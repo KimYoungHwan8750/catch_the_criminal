@@ -14,6 +14,8 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+import { getProjectList, init, insertProject } from './db';
+import getProjectListMock from '../apis/getProjectListMock';
 
 class AppUpdater {
   constructor() {
@@ -22,13 +24,17 @@ class AppUpdater {
     autoUpdater.checkForUpdatesAndNotify();
   }
 }
-
 let mainWindow: BrowserWindow | null = null;
 
-ipcMain.on('ipc-example', async (event, arg) => {
-  const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
-  console.log(msgTemplate(arg));
-  event.reply('ipc-example', msgTemplate('pong'));
+ipcMain.on('get-project-list', async (event, arg) => {
+  try {
+    const result = await getProjectList();
+    console.log('Project list retrieved:', result);
+    event.reply('get-project-list', result);
+  } catch (error) {
+    console.error('Error in get-project-list handler:', error);
+    event.reply('get-project-list', []);
+  }
 });
 
 if (process.env.NODE_ENV === 'production') {
@@ -127,7 +133,14 @@ app.on('window-all-closed', () => {
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
+    // app이 준비된 후 DB 초기화
+    try {
+      await init();
+      console.log('Database initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize database:', error);
+    }
     createWindow();
     app.on('activate', () => {
       // On macOS it's common to re-create a window in the app when the
