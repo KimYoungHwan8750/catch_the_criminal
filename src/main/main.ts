@@ -14,7 +14,7 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-import { getProjectList, init, insertProject } from './db';
+import { getProjectList, getSubProjectList, init, insertProject } from './db';
 import getProjectListMock from '../apis/getProjectListMock';
 
 class AppUpdater {
@@ -34,6 +34,19 @@ ipcMain.on('get-project-list', async (event, arg) => {
   } catch (error) {
     console.error('Error in get-project-list handler:', error);
     event.reply('get-project-list', []);
+  }
+});
+
+ipcMain.on('get-sub-project-list', async (event, arg) => {
+  try {
+    const result = await getSubProjectList(arg[0]);
+    console.log("arg")
+    console.log(arg)
+    console.log(arg[0])
+    event.reply('get-sub-project-list', result);
+  } catch (error) {
+    console.error('Error in get-sub-project-list handler:', error);
+    event.reply('get-sub-project-list', []);
   }
 });
 

@@ -3,30 +3,29 @@ import Item from "./Item";
 import { useEffect, useState } from "react";
 
 
-type Projects = Record<string, SubProjects>;
-type SubProjects = {
-    project_name: string;
-    sub_projects: string[];
+type Projects = {
+  project_id: number;
+  project_name: string;
+  sub_projects: SubProjects[];
+};
+
+export type SubProjects = {
+  project_id: number;
+  sub_project_id: number;
+  sub_project_name: string;
 }
 
+
 function Sidebar() {
-    const [projectList, setProjectList] = useState<string[]>([]);
+    const [projectList, setProjectList] = useState<Projects[]>([]);
+
+    console.log("projectList", projectList);
     useEffect(() => {
         const unsubscribe = window.electron.ipcRenderer.on('get-project-list', (data: any) => {
-            const projects: Projects = {};
-            data.forEach((project: any) => {
-                projects[data['project_id']] = {
-                    project_name: '',
-                    sub_projects: []
-                };
-                projects[data['project_id']]['project_name'] = project['project_name'];
-                projects[data['project_id']]['sub_projects'].push(project['sub_projects']);
-            })
-            console.log(data);
-            setProjectList(data);
+          setProjectList([...data])
         });
         window.electron.ipcRenderer.sendMessage('get-project-list', ['ping']);
-        
+
         return () => {
             if (unsubscribe) {
                 unsubscribe();
@@ -37,7 +36,7 @@ function Sidebar() {
         <Container>
             <Title>Project List</Title>
             {projectList.map((project) => (
-                <Item key={project['project_id']} title={project['project_name']} projects={project['sub_project_name']} />
+              <Item key={project['project_id']} title={project['project_name']} projectId={project['project_id']}/>
             ))}
         </Container>
     )

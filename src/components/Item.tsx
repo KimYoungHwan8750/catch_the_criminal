@@ -1,14 +1,31 @@
 import styled from "styled-components";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SubProjects } from "./Sidebar";
 
 type ItemProps = {
     title: string;
-    projects: string[];
+    projectId: number;
 }
 
-function Item({ title, projects }: ItemProps) {
+function Item({ title, projectId }: ItemProps) {
     const [isOpen, setIsOpen] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
+    const [subProjectList, setSubProjectList] = useState<SubProjects[]>([]);
+    useEffect(() => {
+      getSubProjectList(projectId);
+    }, []);
+
+    function getSubProjectList(projectId: number) {
+      const unsubscribe = window.electron.ipcRenderer.on('get-sub-project-list', (data: any) => {
+        setSubProjectList([...data]);
+      });
+      window.electron.ipcRenderer.sendMessage('get-sub-project-list', [projectId]);
+      return () => {
+        if (unsubscribe) {
+            unsubscribe();
+        }
+      }
+    }
 
     const handleToggle = () => {
         const content = contentRef.current;
@@ -22,12 +39,15 @@ function Item({ title, projects }: ItemProps) {
         setIsOpen(!isOpen);
     };
 
+    console.log("subProjectList");
+    console.log(subProjectList);
+
     return (
         <Details>
             <Summary delay={isOpen ? '0' : '0.3s'} border={isOpen ? '0' : '5px'} onClick={handleToggle}>• {title}</Summary>
             <Content ref={contentRef}>
-                {projects.map((project, index) => (
-                    <div key={index}>{project}</div>
+                {subProjectList?.map((sub_project, index) => (
+                    <div key={index}>{projectId}{sub_project.sub_project_name}</div>
                 ))}
             </Content>
         </Details>
@@ -61,7 +81,7 @@ const Content = styled.div`
     border-bottom-left-radius: 5px;
     box-shadow: 1px 1px 2px gray;
     border-bottom-right-radius: 5px;
-    
+
     > div {
         padding: 10px;
         cursor: pointer;

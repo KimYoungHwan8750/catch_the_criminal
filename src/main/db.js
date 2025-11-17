@@ -16,7 +16,7 @@ function init() {
                 return;
             }
             console.log('Database connected successfully');
-            
+
             db.serialize(() => {
             db.run(`
                 CREATE TABLE IF NOT EXISTS t_project (
@@ -25,7 +25,7 @@ function init() {
                 );`, (err) => {
                 if (err) reject(err);
             });
-            
+
             db.run(`
                 CREATE TABLE  IF NOT EXISTS t_sub_project(
                     sub_project_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,13 +74,30 @@ function getProjectList() {
         database.all(`
             SELECT *
             FROM t_project p
-            LEFT OUTER JOIN t_sub_project sp ON p.project_id = sp.project_id
             `, (err, rows) => {
             if (err) {
                 reject(err);
             } else {
                 resolve(rows);
             }
+        });
+    });
+}
+
+function getSubProjectList(projectId) {
+    return new Promise((resolve, reject) => {
+        const database = getDb();
+        database.all(`
+            SELECT *
+            FROM t_sub_project sp
+            WHERE sp.project_id = ?
+        `, [projectId], (err, rows) => {
+          if (err) {
+            reject(err);
+        } else {
+          console.log(rows);
+            resolve(rows);
+        }
         });
     });
 }
@@ -105,5 +122,6 @@ function insertProject(projectName) {
 export {
     init,
     getProjectList,
+    getSubProjectList,
     insertProject
 }
