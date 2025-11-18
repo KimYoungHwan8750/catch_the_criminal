@@ -1,0 +1,6 @@
+[
+  {
+    "type": "sqlite",
+    "path": "d:\\project\\electron\\catch_the_criminal\\database.db"
+  }
+]

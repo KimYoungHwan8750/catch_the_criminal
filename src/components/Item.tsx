@@ -39,9 +39,6 @@ function Item({ title, projectId }: ItemProps) {
         setIsOpen(!isOpen);
     };
 
-    console.log("subProjectList");
-    console.log(subProjectList);
-
     return (
         <Details>
             <Summary delay={isOpen ? '0' : '0.3s'} border={isOpen ? '0' : '5px'} onClick={handleToggle}>• {title}</Summary>

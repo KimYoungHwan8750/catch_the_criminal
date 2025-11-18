@@ -7,10 +7,12 @@ function Layout() {
   return (
     <Container>
       <Header />
-      <Sidebar />
-      <MainContent>
-        <Outlet />
-      </MainContent>
+      <FlexContainer>
+        <Sidebar />
+        <MainContent>
+          <Outlet />
+        </MainContent>
+      </FlexContainer>
     </Container>
   );
 }
@@ -23,9 +25,19 @@ const Container = styled.div`
 `;
 
 const MainContent = styled.main`
-  flex: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
   overflow: auto;
+  padding: 16px;
+  box-sizing: border-box;
 `;
+
+const FlexContainer = styled.div`
+  display: flex;
+  width: 100%;
+  height: 100%;
+`
 
 export default Layout;
 

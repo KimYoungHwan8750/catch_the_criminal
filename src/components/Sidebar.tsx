@@ -48,6 +48,7 @@ const Container = styled.div`
     width: 300px;
     height: 100%;
     padding: 16px;
+    box-sizing: border-box;
     overflow-y: scroll;
     background-color: #f0f0f0;
     border-right: 1px solid #e0e0e0;

@@ -14,7 +14,7 @@ const Container = styled.div`
     display: flex;
     align-items: center;
     gap: 16px;
-    background-color: #c01515;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     justify-content: center;
     padding: 8px;
     cursor: default;

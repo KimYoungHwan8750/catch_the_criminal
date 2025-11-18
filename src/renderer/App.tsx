@@ -1,6 +1,8 @@
 import { MemoryRouter as Router, Routes, Route } from 'react-router-dom';
 import './App.css';
 import Layout from '../components/Layout';
+import Main from '../components/Main';
+import SplashScreen from '../components/SplashScreen';
 
 function Hello() {
   return (
@@ -14,8 +16,13 @@ export default function App() {
   return (
     <Router>
       <Routes>
+        {/* 레이아웃 없는 스플래시 스크린 */}
+        <Route path="/" element={<SplashScreen />} />
+
+        {/* 레이아웃이 적용되는 페이지들 */}
         <Route element={<Layout />}>
-          <Route path="/" element={<Hello />} />
+          <Route path="/main" element={<Hello />} />
+          {/* 다른 페이지들도 여기에 추가 */}
         </Route>
       </Routes>
     </Router>
