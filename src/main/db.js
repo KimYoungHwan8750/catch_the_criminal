@@ -1,15 +1,15 @@
-const sqlite3 = require('sqlite3').verbose();
+import Database from 'better-sqlite3';
 const path = require('path');
 const { app } = require('electron');
 
-let db = null;
+let db = new Database('./database.db');
 
 function init() {
     return new Promise((resolve, reject) => {
         // 실제 파일 경로로 DB 생성
         const dbPath = path.join("./", 'database.db');
         console.log('Database path:', dbPath);
-        db = new sqlite3.Database(dbPath, (err) => {
+        db = new db.Database(dbPath, (err) => {
             if (err) {
                 console.error('Database initialization error:', err);
                 reject(err);
