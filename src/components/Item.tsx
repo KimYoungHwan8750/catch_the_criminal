@@ -4,22 +4,22 @@ import { SubProjects } from "./Sidebar";
 
 type ItemProps = {
     title: string;
-    projectId: number;
+    projectName: string;
 }
 
-function Item({ title, projectId }: ItemProps) {
+function Item({ title, projectName: projectName }: ItemProps) {
     const [isOpen, setIsOpen] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
     const [subProjectList, setSubProjectList] = useState<SubProjects[]>([]);
     useEffect(() => {
-      getSubProjectList(projectId);
+      getSubProjectList(projectName);
     }, []);
 
-    function getSubProjectList(projectId: number) {
+    function getSubProjectList(projectName: string) {
       const unsubscribe = window.electron.ipcRenderer.on('get-sub-project-list', (data: any) => {
         setSubProjectList([...data]);
       });
-      window.electron.ipcRenderer.sendMessage('get-sub-project-list', [projectId]);
+      window.electron.ipcRenderer.sendMessage('get-sub-project-list', [projectName]);
       return () => {
         if (unsubscribe) {
             unsubscribe();
@@ -44,7 +44,7 @@ function Item({ title, projectId }: ItemProps) {
             <Summary delay={isOpen ? '0' : '0.3s'} border={isOpen ? '0' : '5px'} onClick={handleToggle}>• {title}</Summary>
             <Content ref={contentRef}>
                 {subProjectList?.map((sub_project, index) => (
-                    <div key={index}>{projectId}{sub_project.sub_project_name}</div>
+                    <div key={index}>{sub_project.sub_project_name}</div>
                 ))}
             </Content>
         </Details>

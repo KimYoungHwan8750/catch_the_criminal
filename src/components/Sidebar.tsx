@@ -36,7 +36,7 @@ function Sidebar() {
         <Container>
             <Title>Project List</Title>
             {projectList.map((project) => (
-              <Item key={project['project_id']} title={project['project_name']} projectId={project['project_id']}/>
+              <Item key={project['project_id']} title={project['project_name']} projectName={project['project_name']}/>
             ))}
         </Container>
     )

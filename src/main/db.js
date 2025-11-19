@@ -2,63 +2,48 @@ import Database from 'better-sqlite3';
 const path = require('path');
 const { app } = require('electron');
 
-let db = new Database('./database.db');
+const db = new Database('./database.db');
+db.pragma('journal_mode = WAL');
 
 function init() {
-    return new Promise((resolve, reject) => {
-        // 실제 파일 경로로 DB 생성
-        const dbPath = path.join("./", 'database.db');
-        console.log('Database path:', dbPath);
-        db = new db.Database(dbPath, (err) => {
-            if (err) {
-                console.error('Database initialization error:', err);
-                reject(err);
-                return;
-            }
-            console.log('Database connected successfully');
+    const t_project = `
+      CREATE TABLE IF NOT EXISTS t_project (
+          project_name TEXT PRIMARY KEY
+      );
+    `;
 
-            db.serialize(() => {
-            db.run(`
-                CREATE TABLE IF NOT EXISTS t_project (
-                    project_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_name TEXT
-                );`, (err) => {
-                if (err) reject(err);
-            });
+    const t_sub_project = `
+      CREATE TABLE IF NOT EXISTS t_sub_project(
+          sub_project_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sub_project_name TEXT,
+          project_name TEXT,
+          FOREIGN KEY (project_name) REFERENCES t_project(project_name)
+      );
+    `;
 
-            db.run(`
-                CREATE TABLE  IF NOT EXISTS t_sub_project(
-                    sub_project_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER,
-                    sub_project_name TEXT,
-                    FOREIGN KEY (project_id) REFERENCES t_project(project_id)
-                );`, (err) => {
-                if (err) reject(err);
-            });
+    const t_commit = `
+      CREATE TABLE IF NOT EXISTS t_commit(
+          commit_id TEXT PRIMARY KEY,
+          sub_project_id INTEGER,
+          committer TEXT,
+          commit_msg TEXT,
+          FOREIGN KEY (sub_project_id) REFERENCES t_sub_project(sub_project_id)
+      )
+    `;
 
-            db.run(`
-                CREATE TABLE IF NOT EXISTS t_commit(
-                    commit_id TEXT PRIMARY KEY
-                )`, (err) => {
-                if (err) reject(err);
-            });
+    const t_commit_detail = `
+      CREATE TABLE IF NOT EXISTS t_commit_detail(
+          commit_id TEXT,
+          commit_file TEXT,
+          commit_content TEXT,
+          FOREIGN KEY (commit_id) REFERENCES t_commit(commit_id)
+      );
+    `;
 
-            db.run(`
-                CREATE TABLE IF NOT EXISTS t_comit_detail(
-                    commit_id TEXT,
-                    commit_file,
-                    commit_content,
-                    FOREIGN KEY (commit_id) REFERENCES t_commit(commit_id)
-                );`, (err) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve();
-                }
-            });
-            });
-        });
-    });
+    db.exec(t_project);
+    db.exec(t_sub_project);
+    db.exec(t_commit);
+    db.exec(t_commit_detail);
 }
 
 function getDb() {
@@ -69,59 +54,75 @@ function getDb() {
 }
 
 function getProjectList() {
-    return new Promise((resolve, reject) => {
-        const database = getDb();
-        database.all(`
-            SELECT *
-            FROM t_project p
-            `, (err, rows) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(rows);
-            }
-        });
-    });
-}
-
-function getSubProjectList(projectId) {
-    return new Promise((resolve, reject) => {
-        const database = getDb();
-        database.all(`
-            SELECT *
-            FROM t_sub_project sp
-            WHERE sp.project_id = ?
-        `, [projectId], (err, rows) => {
-          if (err) {
-            reject(err);
-        } else {
-          console.log(rows);
-            resolve(rows);
-        }
-        });
-    });
+  const result = db.prepare(`
+    SELECT *
+    FROM t_project p
+  `).all();
+    return result;
 }
 
 function insertProject(projectName) {
-    return new Promise((resolve, reject) => {
-        const database = getDb();
-        database.run(
-            `INSERT INTO t_project (project_name) VALUES (?)`,
-            [projectName],
-            function(err) {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve({ id: this.lastID });
-                }
-            }
-        );
-    });
+    db.prepare(`
+        INSERT INTO t_project (project_name) VALUES (?)
+    `).run(projectName);
 }
 
+function getSubProjectList(projectName) {
+    const result = db.prepare(`
+        SELECT *
+        FROM t_sub_project sp
+        WHERE sp.project_name = ?
+    `).all(projectName);
+    console.log(result)
+    return result;
+}
+
+function insertSubProject(subProjectName, projectName) {
+    db.prepare(`
+        INSERT INTO t_sub_project (sub_project_name, project_name) VALUES (?, ?)
+    `).run(subProjectName, projectName);
+}
+
+function getCommitList(subProjectId) {
+    const result = db.prepare(`
+        SELECT *
+        FROM t_commit c
+        WHERE c.sub_project_id = ?
+    `).all(subProjectId);
+    return result;
+}
+
+function insertCommit(commitId, subProjectId, committer, commitMsg) {
+  db.prepare(`
+    INSERT INTO t_commit (commit_id, sub_project_id, committer, commit_msg) VALUES (?, ?, ?, ?)
+  `).run(commitId, subProjectId, committer, commitMsg);
+}
+
+function getCommitDetail(commitId) {
+  const result = db.prepare(`
+    SELECT *
+    FROM t_commit_detail cd
+    WHERE cd.commit_id = ?
+  `).all(commitId);
+  return result;
+}
+
+function insertCommitDetail(commitId, commitFile, commitContent) {
+  db.prepare(`
+    INSERT INTO t_commit_detail (commit_id, commit_file, commit_content) VALUES (?, ?, ?)
+  `).run(commitId, commitFile, commitContent);
+}
+
+
+
 export {
-    init,
-    getProjectList,
-    getSubProjectList,
-    insertProject
+  init,
+  getProjectList,
+  getSubProjectList,
+  insertProject,
+  insertSubProject,
+  getCommitList,
+  insertCommit,
+  getCommitDetail,
+  insertCommitDetail
 }

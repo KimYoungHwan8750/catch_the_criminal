@@ -9,13 +9,14 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
-import { getProjectList, getSubProjectList, init, insertProject } from './db';
-import getProjectListMock from '../apis/getProjectListMock';
+import { init } from './db';
+import { initCrawling } from '../crawling/main';
+import { initIpc } from './ipc';
 
 class AppUpdater {
   constructor() {
@@ -25,30 +26,6 @@ class AppUpdater {
   }
 }
 let mainWindow: BrowserWindow | null = null;
-
-ipcMain.on('get-project-list', async (event, arg) => {
-  try {
-    const result = await getProjectList();
-    console.log('Project list retrieved:', result);
-    event.reply('get-project-list', result);
-  } catch (error) {
-    console.error('Error in get-project-list handler:', error);
-    event.reply('get-project-list', []);
-  }
-});
-
-ipcMain.on('get-sub-project-list', async (event, arg) => {
-  try {
-    const result = await getSubProjectList(arg[0]);
-    console.log("arg")
-    console.log(arg)
-    console.log(arg[0])
-    event.reply('get-sub-project-list', result);
-  } catch (error) {
-    console.error('Error in get-sub-project-list handler:', error);
-    event.reply('get-sub-project-list', []);
-  }
-});
 
 if (process.env.NODE_ENV === 'production') {
   const sourceMapSupport = require('source-map-support');
@@ -147,9 +124,11 @@ app.on('window-all-closed', () => {
 app
   .whenReady()
   .then(async () => {
-    // app이 준비된 후 DB 초기화
+    // app이 준비된 후 DB 초기화 및 IPC 핸들러 등록
     try {
-      await init();
+      await initCrawling();
+      init();
+      initIpc(); // IPC 핸들러 초기화
       console.log('Database initialized successfully');
     } catch (error) {
       console.error('Failed to initialize database:', error);
