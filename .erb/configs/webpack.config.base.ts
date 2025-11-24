@@ -11,6 +11,7 @@ const configuration: webpack.Configuration = {
   externals: [
     ...Object.keys(externals || {}),
     'sqlite3', // 네이티브 모듈은 externals로 처리
+    'playwright', // Playwright를 externals로 처리
   ],
 
   stats: 'errors-only',

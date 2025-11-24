@@ -40,10 +40,19 @@ function init() {
       );
     `;
 
+    const t_user_credentials = `
+      CREATE TABLE IF NOT EXISTS t_user_credentials(
+          username TEXT PRIMARY KEY,
+          password TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
     db.exec(t_project);
     db.exec(t_sub_project);
     db.exec(t_commit);
     db.exec(t_commit_detail);
+    db.exec(t_user_credentials);
 }
 
 function getDb() {
@@ -113,7 +122,21 @@ function insertCommitDetail(commitId, commitFile, commitContent) {
   `).run(commitId, commitFile, commitContent);
 }
 
+function saveUserCredentials(username, password) {
+  // REPLACE를 사용하여 username이 존재하면 업데이트, 없으면 삽입
+  db.prepare(`
+    INSERT OR REPLACE INTO t_user_credentials (username, password) VALUES (?, ?)
+  `).run(username, password);
+}
 
+function getUserCredentials() {
+  const result = db.prepare(`
+    SELECT username, password
+    FROM t_user_credentials
+    LIMIT 1
+  `).get();
+  return result;
+}
 
 export {
   init,
@@ -124,5 +147,7 @@ export {
   getCommitList,
   insertCommit,
   getCommitDetail,
-  insertCommitDetail
+  insertCommitDetail,
+  saveUserCredentials,
+  getUserCredentials
 }
