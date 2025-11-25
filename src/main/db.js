@@ -16,6 +16,7 @@ function init() {
       CREATE TABLE IF NOT EXISTS t_sub_project(
           sub_project_id INTEGER PRIMARY KEY AUTOINCREMENT,
           sub_project_name TEXT,
+          sub_project_uuid TEXT UNIQUE,
           project_name TEXT,
           FOREIGN KEY (project_name) REFERENCES t_project(project_name)
       );
@@ -48,11 +49,34 @@ function init() {
       );
     `;
 
+    const t_metadata = `
+      CREATE TABLE IF NOT EXISTS t_metadata(
+          key TEXT PRIMARY KEY,
+          value TEXT
+      );
+    `;
+
     db.exec(t_project);
     db.exec(t_sub_project);
     db.exec(t_commit);
     db.exec(t_commit_detail);
     db.exec(t_user_credentials);
+    db.exec(t_metadata);
+
+    // 마이그레이션: 기존 테이블에 sub_project_uuid 컬럼 추가
+    try {
+        // 컬럼이 이미 있는지 확인
+        const columns = db.prepare("PRAGMA table_info(t_sub_project)").all();
+        const hasUuidColumn = columns.some(col => col.name === 'sub_project_uuid');
+
+        if (!hasUuidColumn) {
+            console.log('Adding sub_project_uuid column to t_sub_project table...');
+            db.exec('ALTER TABLE t_sub_project ADD COLUMN sub_project_uuid TEXT UNIQUE');
+            console.log('Column added successfully');
+        }
+    } catch (error) {
+        console.error('Migration error:', error);
+    }
 }
 
 function getDb() {
@@ -86,10 +110,54 @@ function getSubProjectList(projectName) {
     return result;
 }
 
-function insertSubProject(subProjectName, projectName) {
+function insertSubProject(subProjectName, subProjectUuid, projectName) {
     db.prepare(`
-        INSERT INTO t_sub_project (sub_project_name, project_name) VALUES (?, ?)
-    `).run(subProjectName, projectName);
+        INSERT OR IGNORE INTO t_sub_project (sub_project_name, sub_project_uuid, project_name) VALUES (?, ?, ?)
+    `).run(subProjectName, subProjectUuid, projectName);
+}
+
+function clearAllData() {
+    db.exec('DELETE FROM t_commit_detail');
+    db.exec('DELETE FROM t_commit');
+    db.exec('DELETE FROM t_sub_project');
+    db.exec('DELETE FROM t_project');
+}
+
+function saveProjectsData(projects) {
+    // 트랜잭션으로 처리
+    const insertProjectStmt = db.prepare('INSERT OR IGNORE INTO t_project (project_name) VALUES (?)');
+    const insertSubProjectStmt = db.prepare('INSERT OR IGNORE INTO t_sub_project (sub_project_name, sub_project_uuid, project_name) VALUES (?, ?, ?)');
+
+    const transaction = db.transaction((projectsData) => {
+        for (const project of projectsData) {
+            // 프로젝트 삽입
+            insertProjectStmt.run(project.name);
+
+            // 서브프로젝트 삽입
+            for (const subProject of project.subProjects) {
+                insertSubProjectStmt.run(subProject.name, subProject.uuid, project.name);
+            }
+        }
+    });
+
+    transaction(projects);
+
+    // 갱신 일자 저장
+    saveLastUpdateTime();
+}
+
+function saveLastUpdateTime() {
+    const now = new Date().toISOString();
+    db.prepare(`
+        INSERT OR REPLACE INTO t_metadata (key, value) VALUES ('last_crawl_time', ?)
+    `).run(now);
+}
+
+function getLastUpdateTime() {
+    const result = db.prepare(`
+        SELECT value FROM t_metadata WHERE key = 'last_crawl_time'
+    `).get();
+    return result ? result.value : null;
 }
 
 function getCommitList(subProjectId) {
@@ -149,5 +217,8 @@ export {
   getCommitDetail,
   insertCommitDetail,
   saveUserCredentials,
-  getUserCredentials
+  getUserCredentials,
+  clearAllData,
+  saveProjectsData,
+  getLastUpdateTime
 }

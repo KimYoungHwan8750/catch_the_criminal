@@ -63,10 +63,97 @@ async function isSignedIn(page: Page) {
   }
 }
 
+async function logout() {
+  if (!page) throw new Error('Page not initialized');
+
+  try {
+    // 로그아웃 페이지로 이동 (실제 Git 서버의 로그아웃 URL)
+    await page.goto('http://git.wnpsoft.co.kr/Home/LogOff');
+    await page.waitForLoadState('networkidle');
+
+    // 로그아웃 성공 여부 확인 (로그인 페이지로 돌아갔는지 확인)
+    const signedOut = !(await isSignedIn(page));
+    return signedOut;
+  } catch (error) {
+    console.error('Logout error:', error);
+    throw error;
+  }
+}
+
+interface SubProject {
+  name: string;
+  uuid: string;
+  url: string;
+}
+
+interface Project {
+  name: string;
+  subProjects: SubProject[];
+}
+
+async function crawlRepositories(): Promise<Project[]> {
+  if (!page) throw new Error('Page not initialized');
+
+  try {
+    // Repository Index 페이지로 이동
+    await page.goto('http://git.wnpsoft.co.kr/Repository/Index');
+    await page.waitForLoadState('networkidle');
+
+    // select#Repositories에서 optgroup과 option들을 파싱
+    const projects = await page.evaluate(() => {
+      const select = document.querySelector('select#Repositories');
+      if (!select) return [];
+
+      const projectsData: any[] = [];
+      const optgroups = select.querySelectorAll('optgroup');
+
+      optgroups.forEach(optgroup => {
+        const projectName = optgroup.getAttribute('label') || '';
+        const options = optgroup.querySelectorAll('option');
+        const subProjects: any[] = [];
+
+        options.forEach(option => {
+          const url = option.getAttribute('value') || '';
+          const name = option.textContent?.trim() || '';
+
+          // URL에서 UUID 추출: /Repository/Detail/{uuid}
+          const uuidMatch = url.match(/\/Repository\/Detail\/([a-f0-9-]+)/i);
+          const uuid = uuidMatch ? uuidMatch[1] : '';
+
+          if (name && uuid) {
+            subProjects.push({
+              name,
+              uuid,
+              url
+            });
+          }
+        });
+
+        if (projectName && subProjects.length > 0) {
+          projectsData.push({
+            name: projectName,
+            subProjects
+          });
+        }
+      });
+
+      return projectsData;
+    });
+
+    console.log(`Crawled ${projects.length} projects`);
+    return projects;
+  } catch (error) {
+    console.error('Crawl repositories error:', error);
+    throw error;
+  }
+}
+
 export {
   signIn,
   isSignedIn,
   getPage,
   initCrawling,
-  login
+  login,
+  logout,
+  crawlRepositories
 };

@@ -43,6 +43,8 @@ function SplashScreen() {
     setError('');
 
     // DB에 자격증명 저장
+    console.log('username', username);
+    console.log('password', password);
     window.electron.ipcRenderer.sendMessage('save-credentials', { username, password });
 
     // 자격증명 저장 응답 대기

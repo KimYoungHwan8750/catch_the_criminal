@@ -5,15 +5,17 @@ import { SubProjects } from "./Sidebar";
 type ItemProps = {
     title: string;
     projectName: string;
+    searchTerm?: string;
 }
 
-function Item({ title, projectName: projectName }: ItemProps) {
+function Item({ title, projectName: projectName, searchTerm = "" }: ItemProps) {
     const [isOpen, setIsOpen] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
     const [subProjectList, setSubProjectList] = useState<SubProjects[]>([]);
+
     useEffect(() => {
       getSubProjectList(projectName);
-    }, []);
+    }, [projectName]);
 
     function getSubProjectList(projectName: string) {
       const unsubscribe = window.electron.ipcRenderer.on('get-sub-project-list', (data: any) => {
@@ -39,11 +41,35 @@ function Item({ title, projectName: projectName }: ItemProps) {
         setIsOpen(!isOpen);
     };
 
+    // 서브프로젝트 필터링
+    const filteredSubProjects = subProjectList.filter(sub =>
+        sub.sub_project_name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    // 검색어가 있고 필터링된 서브프로젝트가 있으면 자동으로 열기
+    useEffect(() => {
+        const content = contentRef.current;
+        if (!content) return;
+
+        if (searchTerm && filteredSubProjects.length > 0 && !isOpen) {
+            content.style.height = content.scrollHeight + 'px';
+            setIsOpen(true);
+        } else if (searchTerm && filteredSubProjects.length === 0 && isOpen) {
+            content.style.height = '0px';
+            setIsOpen(false);
+        }
+    }, [searchTerm, filteredSubProjects.length]);
+
+    // 검색어가 있고 매칭되는 서브프로젝트가 없으면 프로젝트 자체를 숨김
+    if (searchTerm && filteredSubProjects.length === 0) {
+        return null;
+    }
+
     return (
         <Details>
             <Summary delay={isOpen ? '0' : '0.3s'} border={isOpen ? '0' : '5px'} onClick={handleToggle}>• {title}</Summary>
             <Content ref={contentRef}>
-                {subProjectList?.map((sub_project, index) => (
+                {filteredSubProjects?.map((sub_project, index) => (
                     <div key={index}>{sub_project.sub_project_name}</div>
                 ))}
             </Content>

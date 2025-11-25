@@ -21,7 +21,7 @@ export default function App() {
 
         {/* 레이아웃이 적용되는 페이지들 */}
         <Route element={<Layout />}>
-          <Route path="/main" element={<Hello />} />
+          <Route path="/main" element={<Main />} />
           {/* 다른 페이지들도 여기에 추가 */}
         </Route>
       </Routes>
