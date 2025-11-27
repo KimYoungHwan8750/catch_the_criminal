@@ -22,8 +22,6 @@ function Sidebar() {
     const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
 
-    console.log("projectList", projectList);
-
     useEffect(() => {
         loadProjects();
         loadLastUpdateTime();
@@ -77,10 +75,22 @@ function Sidebar() {
         });
     };
 
-    // 프로젝트 이름으로 필터링
-    const filteredProjects = projectList.filter(project =>
-        project.project_name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // 프로젝트 이름 및 서브 프로젝트 이름으로 필터링
+    const filteredProjects = projectList.filter(project => {
+        const searchLower = searchTerm.toLowerCase().trim();
+
+        // 프로젝트 이름 검색
+        const projectNameMatch = project.project_name.toLowerCase().includes(searchLower);
+
+        // 서브 프로젝트 이름 검색
+        const subProjectMatch = project.sub_projects?.some(subProject =>
+            subProject.sub_project_name.toLowerCase().includes(searchLower)
+        );
+
+
+
+        return projectNameMatch || subProjectMatch;
+    });
 
     return (
         <Container>
@@ -106,14 +116,20 @@ function Sidebar() {
                 )}
             </SearchWrapper>
             <ProjectList>
-                {filteredProjects.map((project) => (
-                    <Item
-                        key={project['project_id']}
-                        title={project['project_name']}
-                        projectName={project['project_name']}
-                        searchTerm={searchTerm}
-                    />
-                ))}
+                {filteredProjects.map((project) => {
+                    // 프로젝트 이름이 매칭되는지 확인
+                    const isProjectNameMatch = project.project_name.toLowerCase().includes(searchTerm.toLowerCase().trim());
+
+                    return (
+                        <Item
+                            key={project['project_id']}
+                            title={project['project_name']}
+                            projectName={project['project_name']}
+                            searchTerm={searchTerm}
+                            isProjectNameMatch={isProjectNameMatch}
+                        />
+                    );
+                })}
                 {filteredProjects.length === 0 && searchTerm && (
                     <NoResults>
                         검색 결과가 없습니다.
@@ -133,6 +149,9 @@ const Container = styled.div`
     background-color: #f0f0f0;
     border-right: 1px solid #e0e0e0;
     color: white;
+    position: sticky;
+    left: 0;
+    top: 0;
 `
 
 const Header = styled.div`
@@ -266,11 +285,11 @@ const ProjectList = styled.div`
         background-color: transparent;
     }
     &::-webkit-scrollbar-thumb {
-        background-color: #c01515;
+        background-color: #667eea;
         border-radius: 10px;
     }
     &::-webkit-scrollbar-thumb:hover {
-        background-color: #B50505;
+        background-color: #5976f7;
     }
 `
 

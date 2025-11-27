@@ -33,11 +33,14 @@ const Container = styled.div`
     justify-content: space-between;
     gap: 16px;
     width: 100%;
+    height: 70px;
+    padding: 10px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 8px 24px;
+    position: sticky;
+    top:0;
+    box-sizing: border-box;
     cursor: default;
     user-select: none;
-    position: fixed;
 `
 
 const LogoTitleWrapper = styled.div`

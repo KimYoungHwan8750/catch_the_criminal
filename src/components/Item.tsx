@@ -6,9 +6,10 @@ type ItemProps = {
     title: string;
     projectName: string;
     searchTerm?: string;
+    isProjectNameMatch?: boolean;
 }
 
-function Item({ title, projectName: projectName, searchTerm = "" }: ItemProps) {
+function Item({ title, projectName: projectName, searchTerm = "", isProjectNameMatch = false }: ItemProps) {
     const [isOpen, setIsOpen] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
     const [subProjectList, setSubProjectList] = useState<SubProjects[]>([]);
@@ -41,10 +42,12 @@ function Item({ title, projectName: projectName, searchTerm = "" }: ItemProps) {
         setIsOpen(!isOpen);
     };
 
-    // 서브프로젝트 필터링
-    const filteredSubProjects = subProjectList.filter(sub =>
-        sub.sub_project_name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // 서브프로젝트 필터링: 프로젝트 이름이 매칭되면 모든 서브프로젝트 표시
+    const filteredSubProjects = isProjectNameMatch 
+        ? subProjectList 
+        : subProjectList.filter(sub =>
+            sub.sub_project_name.toLowerCase().includes(searchTerm.toLowerCase())
+        );
 
     // 검색어가 있고 필터링된 서브프로젝트가 있으면 자동으로 열기
     useEffect(() => {
@@ -52,16 +55,34 @@ function Item({ title, projectName: projectName, searchTerm = "" }: ItemProps) {
         if (!content) return;
 
         if (searchTerm && filteredSubProjects.length > 0 && !isOpen) {
-            content.style.height = content.scrollHeight + 'px';
             setIsOpen(true);
+            // DOM 업데이트 후 높이 계산
+            requestAnimationFrame(() => {
+                if (content) {
+                    content.style.height = content.scrollHeight + 'px';
+                }
+            });
         } else if (searchTerm && filteredSubProjects.length === 0 && isOpen) {
             content.style.height = '0px';
             setIsOpen(false);
         }
     }, [searchTerm, filteredSubProjects.length]);
 
+    // isOpen이 true일 때 filteredSubProjects가 변경되면 높이 재계산
+    useEffect(() => {
+        const content = contentRef.current;
+        if (!content || !isOpen) return;
+
+        requestAnimationFrame(() => {
+            if (content) {
+                content.style.height = content.scrollHeight + 'px';
+            }
+        });
+    }, [filteredSubProjects.length, isOpen]);
+
     // 검색어가 있고 매칭되는 서브프로젝트가 없으면 프로젝트 자체를 숨김
-    if (searchTerm && filteredSubProjects.length === 0) {
+    // 단, 프로젝트 이름이 매칭되는 경우는 제외
+    if (searchTerm && filteredSubProjects.length === 0 && !isProjectNameMatch) {
         return null;
     }
 
