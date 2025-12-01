@@ -1,384 +1,302 @@
 import styled from "styled-components";
 import { useEffect, useState } from "react";
+import { useParams, useLocation } from "react-router-dom";
 
-interface SubProject {
-  sub_project_id: number;
-  sub_project_name: string;
-  sub_project_uuid: string;
-  project_name: string;
+interface Commit {
+  commit_id: string;
+  committer: string;
+  commit_msg: string;
+  commit_date: string;
 }
 
-interface Project {
-  project_name: string;
-  subProjects?: SubProject[];
+interface CommitFile {
+  commit_id: string;
+  commit_file: string;
+  commit_content: string;
+}
+
+interface Branch {
+  name: string;
+  isDefault: boolean;
 }
 
 function Main() {
-  const [projectList, setProjectList] = useState<Project[]>([]);
+  const { uuid } = useParams<{ uuid: string }>();
+  const location = useLocation();
+  const subProjectName = location.state?.subProjectName || '';
+  const projectName = location.state?.projectName || '';
+
+  const [commits, setCommits] = useState<Commit[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [authors, setAuthors] = useState<string[]>([]);
+
+  const [selectedBranch, setSelectedBranch] = useState('master');
+  const [selectedAuthor, setSelectedAuthor] = useState('');
+  const [fileNameFilter, setFileNameFilter] = useState('');
   const [isCrawling, setIsCrawling] = useState(false);
-  const [selectedRepo, setSelectedRepo] = useState("");
+
+  const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
+  const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<CommitFile | null>(null);
 
   useEffect(() => {
-    loadProjectList();
-  }, []);
+    if (uuid) {
+      // 자동 크롤링 시작
+      startAutoCrawl();
+    }
+  }, [uuid]);
 
-  const loadProjectList = () => {
-    window.electron.ipcRenderer.sendMessage('get-project-list');
-    window.electron.ipcRenderer.on('get-project-list', (data: any) => {
-      console.log('Received project list:', data);
+  useEffect(() => {
+    if (uuid && (selectedAuthor || fileNameFilter)) {
+      loadCommits();
+    }
+  }, [selectedAuthor, fileNameFilter]);
 
-      // 각 프로젝트에 대해 서브프로젝트 가져오기
-      const projectsWithSubs: Project[] = [];
+  const startAutoCrawl = async () => {
+    if (!uuid) return;
 
-      if (data && data.length > 0) {
-        data.forEach((project: any) => {
-          window.electron.ipcRenderer.sendMessage('get-sub-project-list', [project.project_name]);
-        });
-
-        window.electron.ipcRenderer.on('get-sub-project-list', (subData: any) => {
-          if (subData && subData.length > 0) {
-            const projectName = subData[0].project_name;
-            const existingProject = projectsWithSubs.find(p => p.project_name === projectName);
-
-            if (!existingProject) {
-              projectsWithSubs.push({
-                project_name: projectName,
-                subProjects: subData
-              });
-            }
-          }
-
-          setProjectList([...projectsWithSubs]);
-        });
-      }
-    });
-  };
-
-  const handleCrawl = () => {
     setIsCrawling(true);
-    window.electron.ipcRenderer.sendMessage('crawl-and-save-repositories');
-    window.electron.ipcRenderer.on('crawl-and-save-repositories', (result: any) => {
+
+    // 브랜치 로드
+    loadBranches();
+
+    // 커밋 크롤링
+    window.electron.ipcRenderer.sendMessage('crawl-commits', {
+      uuid,
+      branch: selectedBranch
+    });
+
+    window.electron.ipcRenderer.on('crawl-commits', (result: any) => {
       setIsCrawling(false);
       if (result.success) {
-        console.log(`Successfully crawled ${result.count} projects`);
-        loadProjectList();
+        console.log(`Successfully crawled ${result.count} commits`);
+        loadCommits();
+        loadAuthors();
       } else {
         console.error('Crawl failed:', result.error);
+        // 크롤링 실패해도 DB에서 로드 시도
+        loadCommits();
+        loadAuthors();
       }
     });
   };
 
-  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    setSelectedRepo(value);
-    if (value) {
-      // 여기서 상세 페이지로 이동하거나 다른 작업 수행
-      console.log('Selected repository:', value);
-    }
+  const loadBranches = () => {
+    if (!uuid) return;
+
+    window.electron.ipcRenderer.sendMessage('get-branches', uuid);
+    window.electron.ipcRenderer.on('get-branches', (data: any) => {
+      if (data && data.length > 0) {
+        setBranches(data);
+        // 기본 브랜치 설정
+        const defaultBranch = data.find((b: Branch) => b.isDefault);
+        if (defaultBranch) {
+          setSelectedBranch(defaultBranch.name);
+        } else if (data.length > 0) {
+          setSelectedBranch(data[0].name);
+        }
+      } else {
+        setBranches([{ name: 'master', isDefault: true }]);
+        setSelectedBranch('master');
+      }
+    });
   };
+
+  const loadAuthors = () => {
+    window.electron.ipcRenderer.sendMessage('get-authors-from-db', uuid);
+    window.electron.ipcRenderer.on('get-authors-from-db', (data: any) => {
+      if (data && data.length > 0) {
+        setAuthors(data);
+      } else {
+        // DB에 없으면 크롤링
+        window.electron.ipcRenderer.sendMessage('crawl-authors', uuid);
+      }
+    });
+
+    window.electron.ipcRenderer.on('crawl-authors', (data: any) => {
+      if (data) {
+        setAuthors(data);
+      }
+    });
+  };
+
+  const loadCommits = () => {
+    if (!uuid) return;
+
+    window.electron.ipcRenderer.sendMessage('get-commits-from-db', {
+      uuid,
+      fileName: fileNameFilter || undefined,
+      author: selectedAuthor || undefined
+    });
+
+    window.electron.ipcRenderer.on('get-commits-from-db', (data: any) => {
+      if (data && data.length > 0) {
+        setCommits(data);
+      } else {
+        setCommits([]);
+      }
+    });
+  };
+
+
+  const handleCommitClick = (commit: Commit) => {
+    setSelectedCommit(commit);
+
+    window.electron.ipcRenderer.sendMessage('get-commit-detail-from-db', commit.commit_id);
+    window.electron.ipcRenderer.on('get-commit-detail-from-db', (data: any) => {
+      if (data) {
+        setCommitFiles(data);
+        setShowModal(true);
+      }
+    });
+  };
+
+  const handleFileClick = (file: CommitFile) => {
+    setSelectedFile(file);
+  };
+
+  const renderDiff = (diff: string) => {
+    if (!diff) return null;
+
+    const lines = diff.split('\n');
+    return lines.map((line, index) => {
+      let bgColor = 'transparent';
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        bgColor = '#e6ffec';
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        bgColor = '#ffebe9';
+      }
+
+      return (
+        <DiffLine key={index} bgColor={bgColor}>
+          {line}
+        </DiffLine>
+      );
+    });
+  };
+
+  // 로딩 중일 때
+  if (isCrawling) {
+    return (
+      <Container>
+        <LoadingOverlay>
+          <LoadingSpinner />
+          <LoadingText>커밋 정보를 불러오는 중입니다...</LoadingText>
+          <LoadingSubText>잠시만 기다려주세요</LoadingSubText>
+        </LoadingOverlay>
+      </Container>
+    );
+  }
 
   return (
     <Container>
-      <p>"text"1</p>
-      <p>"text"2</p>
-      <p>"text"3</p>
-      <p>"text"4</p>
-      <p>"text"5</p>
-      <p>"text"6</p>
-      <p>"text"7</p>
-      <p>"text"8</p>
-      <p>"text"9</p>
-      <p>"text"10</p>
-      <p>"text"11</p>
-      <p>"text"12</p>
-      <p>"text"13</p>
-      <p>"text"14</p>
-      <p>"text"15</p>
-      <p>"text"16</p>
-      <p>"text"17</p>
-      <p>"text"18</p>
-      <p>"text"19</p>
-      <p>"text"20</p>
-      <p>"text"21</p>
-      <p>"text"22</p>
-      <p>"text"23</p>
-      <p>"text"24</p>
-      <p>"text"25</p>
-      <p>"text"26</p>
-      <p>"text"27</p>
-      <p>"text"28</p>
-      <p>"text"29</p>
-      <p>"text"30</p>
-      <p>"text"31</p>
-      <p>"text"32</p>
-      <p>"text"33</p>
-      <p>"text"34</p>
-      <p>"text"35</p>
-      <p>"text"36</p>
-      <p>"text"37</p>
-      <p>"text"38</p>
-      <p>"text"39</p>
-      <p>"text"40</p>
-      <p>"text"41</p>
-      <p>"text"42</p>
-      <p>"text"43</p>
-      <p>"text"44</p>
-      <p>"text"45</p>
-      <p>"text"46</p>
-      <p>"text"47</p>
-      <p>"text"48</p>
-      <p>"text"49</p>
-      <p>"text"50</p>
-      <p>"text"51</p>
-      <p>"text"52</p>
-      <p>"text"53</p>
-      <p>"text"54</p>
-      <p>"text"55</p>
-      <p>"text"56</p>
-      <p>"text"57</p>
-      <p>"text"58</p>
-      <p>"text"59</p>
-      <p>"text"60</p>
-      <p>"text"61</p>
-      <p>"text"62</p>
-      <p>"text"63</p>
-      <p>"text"64</p>
-      <p>"text"65</p>
-      <p>"text"66</p>
-      <p>"text"67</p>
-      <p>"text"68</p>
-      <p>"text"69</p>
-      <p>"text"70</p>
-      <p>"text"71</p>
-      <p>"text"72</p>
-      <p>"text"73</p>
-      <p>"text"74</p>
-      <p>"text"75</p>
-      <p>"text"76</p>
-      <p>"text"77</p>
-      <p>"text"78</p>
-      <p>"text"79</p>
-      <p>"text"80</p>
-      <p>"text"81</p>
-      <p>"text"82</p>
-      <p>"text"83</p>
-      <p>"text"84</p>
-      <p>"text"85</p>
-      <p>"text"86</p>
-      <p>"text"87</p>
-      <p>"text"88</p>
-      <p>"text"89</p>
-      <p>"text"90</p>
-      <p>"text"91</p>
-      <p>"text"92</p>
-      <p>"text"93</p>
-      <p>"text"94</p>
-      <p>"text"95</p>
-      <p>"text"96</p>
-      <p>"text"97</p>
-      <p>"text"98</p>
-      <p>"text"99</p>
-      <p>"text"100</p>
-      <p>"text"101</p>
-      <p>"text"102</p>
-      <p>"text"103</p>
-      <p>"text"104</p>
-      <p>"text"105</p>
-      <p>"text"106</p>
-      <p>"text"107</p>
-      <p>"text"108</p>
-      <p>"text"109</p>
-      <p>"text"110</p>
-      <p>"text"111</p>
-      <p>"text"112</p>
-      <p>"text"113</p>
-      <p>"text"114</p>
-      <p>"text"115</p>
-      <p>"text"116</p>
-      <p>"text"117</p>
-      <p>"text"118</p>
-      <p>"text"119</p>
-      <p>"text"120</p>
-      <p>"text"121</p>
-      <p>"text"122</p>
-      <p>"text"123</p>
-      <p>"text"124</p>
-      <p>"text"125</p>
-      <p>"text"126</p>
-      <p>"text"127</p>
-      <p>"text"128</p>
-      <p>"text"129</p>
-      <p>"text"130</p>
-      <p>"text"131</p>
-      <p>"text"132</p>
-      <p>"text"133</p>
-      <p>"text"134</p>
-      <p>"text"135</p>
-      <p>"text"136</p>
-      <p>"text"137</p>
-      <p>"text"138</p>
-      <p>"text"139</p>
-      <p>"text"140</p>
-      <p>"text"141</p>
-      <p>"text"142</p>
-      <p>"text"143</p>
-      <p>"text"144</p>
-      <p>"text"145</p>
-      <p>"text"146</p>
-      <p>"text"147</p>
-      <p>"text"148</p>
-      <p>"text"149</p>
-      <p>"text"150</p>
-      <p>"text"151</p>
-      <p>"text"152</p>
-      <p>"text"153</p>
-      <p>"text"154</p>
-      <p>"text"155</p>
-      <p>"text"156</p>
-      <p>"text"157</p>
-      <p>"text"158</p>
-      <p>"text"159</p>
-      <p>"text"160</p>
-      <p>"text"161</p>
-      <p>"text"162</p>
-      <p>"text"163</p>
-      <p>"text"164</p>
-      <p>"text"165</p>
-      <p>"text"166</p>
-      <p>"text"167</p>
-      <p>"text"168</p>
-      <p>"text"169</p>
-      <p>"text"170</p>
-      <p>"text"171</p>
-      <p>"text"172</p>
-      <p>"text"173</p>
-      <p>"text"174</p>
-      <p>"text"175</p>
-      <p>"text"176</p>
-      <p>"text"177</p>
-      <p>"text"178</p>
-      <p>"text"179</p>
-      <p>"text"180</p>
-      <p>"text"181</p>
-      <p>"text"182</p>
-      <p>"text"183</p>
-      <p>"text"184</p>
-      <p>"text"185</p>
-      <p>"text"186</p>
-      <p>"text"187</p>
-      <p>"text"188</p>
-      <p>"text"189</p>
-      <p>"text"190</p>
-      <p>"text"191</p>
-      <p>"text"192</p>
-      <p>"text"193</p>
-      <p>"text"194</p>
-      <p>"text"195</p>
-      <p>"text"196</p>
-      <p>"text"197</p>
-      <p>"text"198</p>
-      <p>"text"199</p>
-      <p>"text"200</p>
-      <p>"text"201</p>
-      <p>"text"202</p>
-      <p>"text"203</p>
-      <p>"text"204</p>
-      <p>"text"205</p>
-      <p>"text"206</p>
-      <p>"text"207</p>
-      <p>"text"208</p>
-      <p>"text"209</p>
-      <p>"text"210</p>
-      <p>"text"211</p>
-      <p>"text"212</p>
-      <p>"text"213</p>
-      <p>"text"214</p>
-      <p>"text"215</p>
-      <p>"text"216</p>
-      <p>"text"217</p>
-      <p>"text"218</p>
-      <p>"text"219</p>
-      <p>"text"220</p>
-      <p>"text"221</p>
-      <p>"text"222</p>
-      <p>"text"223</p>
-      <p>"text"224</p>
-      <p>"text"225</p>
-      <p>"text"226</p>
-      <p>"text"227</p>
-      <p>"text"228</p>
-      <p>"text"229</p>
-      <p>"text"230</p>
-      <p>"text"231</p>
-      <p>"text"232</p>
-      <p>"text"233</p>
-      <p>"text"234</p>
-      <p>"text"235</p>
-      <p>"text"236</p>
-      <p>"text"237</p>
-      <p>"text"238</p>
-      <p>"text"239</p>
-      <p>"text"240</p>
-      <p>"text"241</p>
-      <p>"text"242</p>
-      <p>"text"243</p>
-      <p>"text"244</p>
-      <p>"text"245</p>
-      <p>"text"246</p>
-      <p>"text"247</p>
-      <p>"text"248</p>
-      <p>"text"249</p>
-      <p>"text"250</p>
-      <p>"text"251</p>
-      <p>"text"252</p>
-      <p>"text"253</p>
-      <p>"text"254</p>
-      <p>"text"255</p>
-      <p>"text"256</p>
-      <p>"text"257</p>
-      <p>"text"258</p>
-      <p>"text"259</p>
-      <p>"text"260</p>
-      <p>"text"261</p>
-      <p>"text"262</p>
-      <p>"text"263</p>
-      <p>"text"264</p>
-      <p>"text"265</p>
-      <p>"text"266</p>
-      <p>"text"267</p>
-      <p>"text"268</p>
-      <p>"text"269</p>
-      <p>"text"270</p>
-      <p>"text"271</p>
-      <p>"text"272</p>
-      <p>"text"273</p>
-      <p>"text"274</p>
-      <p>"text"275</p>
-      <p>"text"276</p>
-      <p>"text"277</p>
-      <p>"text"278</p>
-      <p>"text"279</p>
-      <p>"text"280</p>
-      <p>"text"281</p>
-      <p>"text"282</p>
-      <p>"text"283</p>
-      <p>"text"284</p>
-      <p>"text"285</p>
-      <p>"text"286</p>
-      <p>"text"287</p>
-      <p>"text"288</p>
-      <p>"text"289</p>
-      <p>"text"290</p>
-      <p>"text"291</p>
-      <p>"text"292</p>
-      <p>"text"293</p>
-      <p>"text"294</p>
-      <p>"text"295</p>
-      <p>"text"296</p>
-      <p>"text"297</p>
-      <p>"text"298</p>
-      <p>"text"299</p>
-      <p>"text"300</p>
+      <Toolbar>
+        <ProjectInfo>
+          <ProjectName>{projectName}</ProjectName>
+          <SubProjectName>{subProjectName}</SubProjectName>
+        </ProjectInfo>
+
+        <ToolbarControls>
+          <FilterGroup>
+            <Label>브랜치</Label>
+            <Select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+            >
+              {branches.map((branch, idx) => (
+                <option key={idx} value={branch.name}>
+                  {branch.name} {branch.isDefault ? '(기본)' : ''}
+                </option>
+              ))}
+            </Select>
+          </FilterGroup>
+
+          <FilterGroup>
+            <Label>파일명</Label>
+            <Input
+              type="text"
+              placeholder="파일명으로 검색..."
+              value={fileNameFilter}
+              onChange={(e) => setFileNameFilter(e.target.value)}
+            />
+          </FilterGroup>
+
+          <FilterGroup>
+            <Label>작성자</Label>
+            <Select
+              value={selectedAuthor}
+              onChange={(e) => setSelectedAuthor(e.target.value)}
+            >
+              <option value="">전체</option>
+              {authors.map((author, idx) => (
+                <option key={idx} value={author}>{author}</option>
+              ))}
+            </Select>
+          </FilterGroup>
+        </ToolbarControls>
+      </Toolbar>
+
+      <CommitList>
+        {commits.length === 0 ? (
+          <NoCommits>커밋이 없습니다.</NoCommits>
+        ) : (
+          commits.map((commit) => (
+            <CommitItem key={commit.commit_id} onClick={() => handleCommitClick(commit)}>
+              <CommitMessage>{commit.commit_msg}</CommitMessage>
+              <CommitMeta>
+                <Author>👤 {commit.committer}</Author>
+                <Date>📅 {commit.commit_date}</Date>
+              </CommitMeta>
+            </CommitItem>
+          ))
+        )}
+      </CommitList>
+
+      {showModal && selectedCommit && (
+        <Modal onClick={() => { setShowModal(false); setSelectedFile(null); }}>
+          <ModalContent onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>
+              <ModalTitle>{selectedCommit.commit_msg}</ModalTitle>
+              <CloseButton onClick={() => { setShowModal(false); setSelectedFile(null); }}>✕</CloseButton>
+            </ModalHeader>
+
+            <ModalBody>
+              {!selectedFile ? (
+                <>
+                  <CommitInfo>
+                    <InfoRow>
+                      <InfoLabel>작성자:</InfoLabel>
+                      <InfoValue>{selectedCommit.committer}</InfoValue>
+                    </InfoRow>
+                    <InfoRow>
+                      <InfoLabel>날짜:</InfoLabel>
+                      <InfoValue>{selectedCommit.commit_date}</InfoValue>
+                    </InfoRow>
+                  </CommitInfo>
+
+                  <FileListTitle>변경된 파일 ({commitFiles.length})</FileListTitle>
+                  <FileList>
+                    {commitFiles.map((file, idx) => (
+                      <FileItem key={idx} onClick={() => handleFileClick(file)}>
+                        📄 {file.commit_file}
+                      </FileItem>
+                    ))}
+                  </FileList>
+                </>
+              ) : (
+                <>
+                  <BackButton onClick={() => setSelectedFile(null)}>← 뒤로</BackButton>
+                  <FileTitle>{selectedFile.commit_file}</FileTitle>
+                  <DiffContainer>
+                    <pre>{renderDiff(selectedFile.commit_content)}</pre>
+                  </DiffContainer>
+                </>
+              )}
+            </ModalBody>
+          </ModalContent>
+        </Modal>
+      )}
     </Container>
   );
 }
@@ -386,11 +304,354 @@ function Main() {
 const Container = styled.div`
   display: flex;
   flex-direction: column;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   width: 100%;
-  min-height: 100%;
-  padding: 0px;
+  height: 100%;
+  background: #f5f7fa;
 `;
 
+const Toolbar = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: white;
+  border-bottom: 1px solid #e0e0e0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+`;
+
+const ProjectInfo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+
+const ProjectName = styled.div`
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+`;
+
+const SubProjectName = styled.div`
+  font-size: 18px;
+  font-weight: 700;
+  color: #667eea;
+`;
+
+const ToolbarControls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+`;
+
+const FilterGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const Label = styled.label`
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  white-space: nowrap;
+`;
+
+const Input = styled.input`
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  min-width: 200px;
+  transition: all 0.2s ease;
+
+  &:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  }
+`;
+
+const Select = styled.select`
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  min-width: 150px;
+  cursor: pointer;
+  background: white;
+  transition: all 0.2s ease;
+
+  &:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: #f5f5f5;
+  }
+`;
+
+const LoadingOverlay = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+`;
+
+const LoadingSpinner = styled.div`
+  width: 60px;
+  height: 60px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top: 4px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+
+const LoadingText = styled.div`
+  color: white;
+  font-size: 20px;
+  font-weight: 600;
+  margin-top: 24px;
+`;
+
+const LoadingSubText = styled.div`
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  margin-top: 8px;
+`;
+
+const CommitList = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+`;
+
+const NoCommits = styled.div`
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 16px;
+`;
+
+const CommitItem = styled.div`
+  background: white;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #667eea;
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+`;
+
+const CommitMessage = styled.div`
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+`;
+
+const CommitMeta = styled.div`
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  color: #666;
+`;
+
+const Author = styled.span``;
+
+const Date = styled.span``;
+
+const Modal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+`;
+
+const ModalContent = styled.div`
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 1200px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+`;
+
+const ModalHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #e0e0e0;
+`;
+
+const ModalTitle = styled.h2`
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin: 0;
+  flex: 1;
+  padding-right: 20px;
+`;
+
+const CloseButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: #f0f0f0;
+    color: #333;
+  }
+`;
+
+const ModalBody = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+`;
+
+const CommitInfo = styled.div`
+  background: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+`;
+
+const InfoRow = styled.div`
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+`;
+
+const InfoLabel = styled.span`
+  font-weight: 600;
+  color: #555;
+  min-width: 80px;
+`;
+
+const InfoValue = styled.span`
+  color: #333;
+`;
+
+const FileListTitle = styled.h3`
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 12px 0;
+`;
+
+const FileList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const FileItem = styled.div`
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+
+  &:hover {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+    transform: translateX(4px);
+  }
+`;
+
+const BackButton = styled.button`
+  background: #f0f0f0;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 16px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: #e0e0e0;
+  }
+`;
+
+const FileTitle = styled.h3`
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 16px 0;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+`;
+
+const DiffContainer = styled.div`
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 600px;
+
+  pre {
+    margin: 0;
+    padding: 16px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+`;
+
+const DiffLine = styled.div<{ bgColor: string }>`
+  background-color: ${props => props.bgColor};
+  padding: 2px 8px;
+  white-space: pre;
+`;
 
 export default Main;

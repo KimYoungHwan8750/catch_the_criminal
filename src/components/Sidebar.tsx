@@ -97,7 +97,7 @@ function Sidebar() {
             <Header>
                 <Title>Project List</Title>
                 <CrawlButton onClick={handleCrawl} disabled={isCrawling}>
-                    {isCrawling ? '🔄 크롤링 중...' : '🔄 크롤링'}
+                    {isCrawling ? '🔄 갱신 중...' : '🔄 갱신'}
                 </CrawlButton>
             </Header>
             <UpdateInfo>
@@ -107,7 +107,7 @@ function Sidebar() {
                 <SearchIcon>🔍</SearchIcon>
                 <SearchInput
                     type="text"
-                    placeholder="프로젝트 또는 저장소 검색..."
+                    placeholder="프로젝트 또는 서브프로젝트 검색..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                 />

@@ -2,7 +2,22 @@
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
-export type Channels = 'get-project-list' | 'get-sub-project-list' | 'check-signed-in' | 'save-credentials' | 'login-with-credentials' | 'logout' | 'crawl-and-save-repositories' | 'get-last-update-time';
+export type Channels = 
+  | 'get-project-list' 
+  | 'get-sub-project-list' 
+  | 'check-signed-in' 
+  | 'save-credentials' 
+  | 'login-with-credentials' 
+  | 'logout' 
+  | 'crawl-and-save-repositories' 
+  | 'get-last-update-time'
+  | 'get-branches'
+  | 'get-commits-from-db'
+  | 'crawl-commits'
+  | 'get-authors-from-db'
+  | 'crawl-authors'
+  | 'get-commit-detail-from-db'
+  | 'crawl-commit-detail';
 
 const electronHandler = {
   ipcRenderer: {

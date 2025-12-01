@@ -1,6 +1,31 @@
 import { ipcMain } from "electron";
-import { getProjectList, getSubProjectList, saveUserCredentials, getUserCredentials, saveProjectsData, getLastUpdateTime } from "./db";
-import { getPage, isSignedIn, login, logout, crawlRepositories } from "../crawling/main";
+import { 
+  getProjectList, 
+  getSubProjectList, 
+  saveUserCredentials, 
+  getUserCredentials, 
+  deleteUserCredentials, 
+  saveProjectsData, 
+  getLastUpdateTime,
+  getSubProjectByUuid,
+  getCommitsBySubProjectUuid,
+  getCommitsByFile,
+  getAuthorsBySubProjectUuid,
+  getCommitsByAuthor,
+  saveCommitWithDetails,
+  getCommitDetail
+} from "./db";
+import { 
+  getPage, 
+  isSignedIn, 
+  login, 
+  logout, 
+  crawlRepositories,
+  getBranches,
+  getCommits,
+  getCommitDetail as crawlCommitDetail,
+  getAuthors
+} from "../crawling/main";
 
 function initIpc() {
   ipcMain.on('get-project-list', async (event, arg) => {
@@ -79,6 +104,13 @@ function initIpc() {
     try {
       const logoutSuccess = await logout();
       console.log('Logout result:', logoutSuccess);
+      
+      // 로그아웃 성공 시 저장된 자격증명 삭제
+      if (logoutSuccess) {
+        deleteUserCredentials();
+        console.log('User credentials deleted');
+      }
+      
       event.reply('logout', logoutSuccess);
     } catch (error) {
       console.error('Error during logout:', error);
@@ -110,6 +142,120 @@ function initIpc() {
     } catch (error) {
       console.error('Error getting last update time:', error);
       event.reply('get-last-update-time', null);
+    }
+  });
+
+  // 브랜치 목록 조회
+  ipcMain.on('get-branches', async (event, uuid: string) => {
+    try {
+      const branches = await getBranches(uuid);
+      event.reply('get-branches', branches);
+    } catch (error) {
+      console.error('Error getting branches:', error);
+      event.reply('get-branches', [{ name: 'master', isDefault: true }]);
+    }
+  });
+
+  // 커밋 목록 조회 (DB에서)
+  ipcMain.on('get-commits-from-db', async (event, arg: { uuid: string, fileName?: string, author?: string }) => {
+    try {
+      const { uuid, fileName, author } = arg;
+      
+      let commits;
+      if (fileName) {
+        commits = getCommitsByFile(uuid, fileName);
+      } else if (author) {
+        commits = getCommitsByAuthor(uuid, author);
+      } else {
+        commits = getCommitsBySubProjectUuid(uuid);
+      }
+      
+      event.reply('get-commits-from-db', commits);
+    } catch (error) {
+      console.error('Error getting commits from DB:', error);
+      event.reply('get-commits-from-db', []);
+    }
+  });
+
+  // 커밋 크롤링 및 저장
+  ipcMain.on('crawl-commits', async (event, arg: { uuid: string, branch?: string }) => {
+    try {
+      const { uuid, branch = 'master' } = arg;
+      console.log(`Crawling commits for ${uuid}, branch: ${branch}`);
+      
+      const commits = await getCommits(uuid, branch);
+      console.log(`Crawled ${commits.length} commits`);
+      
+      // 각 커밋의 상세 정보 크롤링
+      let savedCount = 0;
+      for (const commit of commits) {
+        try {
+          const detail = await crawlCommitDetail(uuid, commit.commitId);
+          saveCommitWithDetails(
+            detail.commitId,
+            uuid,
+            detail.author,
+            detail.message,
+            detail.date,
+            detail.files
+          );
+          savedCount++;
+        } catch (error) {
+          console.error(`Error crawling commit ${commit.commitId}:`, error);
+        }
+      }
+      
+      console.log(`Successfully saved ${savedCount} commits`);
+      event.reply('crawl-commits', { success: true, count: savedCount });
+    } catch (error) {
+      console.error('Error crawling commits:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      event.reply('crawl-commits', { success: false, error: errorMessage });
+    }
+  });
+
+  // 작성자 목록 조회 (DB에서)
+  ipcMain.on('get-authors-from-db', async (event, uuid: string) => {
+    try {
+      const authors = getAuthorsBySubProjectUuid(uuid);
+      event.reply('get-authors-from-db', authors);
+    } catch (error) {
+      console.error('Error getting authors from DB:', error);
+      event.reply('get-authors-from-db', []);
+    }
+  });
+
+  // 작성자 목록 조회 (크롤링)
+  ipcMain.on('crawl-authors', async (event, uuid: string) => {
+    try {
+      const authors = await getAuthors(uuid);
+      event.reply('crawl-authors', authors);
+    } catch (error) {
+      console.error('Error crawling authors:', error);
+      event.reply('crawl-authors', []);
+    }
+  });
+
+  // 커밋 상세 정보 조회 (DB에서)
+  ipcMain.on('get-commit-detail-from-db', async (event, commitId: string) => {
+    try {
+      const files = getCommitDetail(commitId);
+      event.reply('get-commit-detail-from-db', files);
+    } catch (error) {
+      console.error('Error getting commit detail from DB:', error);
+      event.reply('get-commit-detail-from-db', []);
+    }
+  });
+
+  // 커밋 상세 정보 크롤링
+  ipcMain.on('crawl-commit-detail', async (event, arg: { uuid: string, commitId: string }) => {
+    try {
+      const { uuid, commitId } = arg;
+      const detail = await crawlCommitDetail(uuid, commitId);
+      event.reply('crawl-commit-detail', detail);
+    } catch (error) {
+      console.error('Error crawling commit detail:', error);
+      event.reply('crawl-commit-detail', null);
     }
   });
 }

@@ -1,5 +1,6 @@
 import styled from "styled-components";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { SubProjects } from "./Sidebar";
 
 type ItemProps = {
@@ -10,6 +11,7 @@ type ItemProps = {
 }
 
 function Item({ title, projectName: projectName, searchTerm = "", isProjectNameMatch = false }: ItemProps) {
+    const navigate = useNavigate();
     const [isOpen, setIsOpen] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
     const [subProjectList, setSubProjectList] = useState<SubProjects[]>([]);
@@ -86,12 +88,29 @@ function Item({ title, projectName: projectName, searchTerm = "", isProjectNameM
         return null;
     }
 
+    const handleSubProjectClick = (subProject: SubProjects) => {
+        navigate(`/main/${subProject.sub_project_uuid}`, {
+            state: {
+                subProjectName: subProject.sub_project_name,
+                projectName: projectName
+            }
+        });
+    };
+
     return (
         <Details>
             <Summary delay={isOpen ? '0' : '0.3s'} border={isOpen ? '0' : '5px'} onClick={handleToggle}>• {title}</Summary>
             <Content ref={contentRef}>
                 {filteredSubProjects?.map((sub_project, index) => (
-                    <div key={index}>{sub_project.sub_project_name}</div>
+                    <SubProjectItem 
+                        key={index}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleSubProjectClick(sub_project);
+                        }}
+                    >
+                        {sub_project.sub_project_name}
+                    </SubProjectItem>
                 ))}
             </Content>
         </Details>
@@ -125,14 +144,20 @@ const Content = styled.div`
     border-bottom-left-radius: 5px;
     box-shadow: 1px 1px 2px gray;
     border-bottom-right-radius: 5px;
+`;
 
-    > div {
-        padding: 10px;
-        cursor: pointer;
+const SubProjectItem = styled.div`
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+        background: #555;
+        padding-left: 15px;
     }
 
-    > div:hover {
-        background: #555;
+    &:active {
+        background: #667eea;
     }
 `;
 

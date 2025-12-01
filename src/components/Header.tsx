@@ -1,10 +1,10 @@
 import styled from "styled-components";
 import logo from "../assets/logo3.png";
+import { useEffect } from "react";
 
 function Header() {
-    const handleLogout = () => {
-        window.electron.ipcRenderer.sendMessage('logout');
-        window.electron.ipcRenderer.on('logout', (result) => {
+    useEffect(() => {
+        const unsubscribe = window.electron.ipcRenderer.on('logout', (result) => {
             if (result) {
                 console.log('Logged out successfully');
                 window.location.reload();
@@ -12,6 +12,16 @@ function Header() {
                 console.error('Logout failed');
             }
         });
+
+        return () => {
+            if (unsubscribe) {
+                unsubscribe();
+            }
+        };
+    }, []);
+
+    const handleLogout = () => {
+        window.electron.ipcRenderer.sendMessage('logout');
     };
 
     return (

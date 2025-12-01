@@ -77,6 +77,20 @@ function init() {
     } catch (error) {
         console.error('Migration error:', error);
     }
+
+    // 마이그레이션: t_commit 테이블에 commit_date 컬럼 추가
+    try {
+        const commitColumns = db.prepare("PRAGMA table_info(t_commit)").all();
+        const hasDateColumn = commitColumns.some(col => col.name === 'commit_date');
+
+        if (!hasDateColumn) {
+            console.log('Adding commit_date column to t_commit table...');
+            db.exec('ALTER TABLE t_commit ADD COLUMN commit_date TEXT');
+            console.log('Column added successfully');
+        }
+    } catch (error) {
+        console.error('Migration error:', error);
+    }
 }
 
 function getDb() {
@@ -169,10 +183,10 @@ function getCommitList(subProjectId) {
     return result;
 }
 
-function insertCommit(commitId, subProjectId, committer, commitMsg) {
+function insertCommit(commitId, subProjectId, committer, commitMsg, commitDate = null) {
   db.prepare(`
-    INSERT INTO t_commit (commit_id, sub_project_id, committer, commit_msg) VALUES (?, ?, ?, ?)
-  `).run(commitId, subProjectId, committer, commitMsg);
+    INSERT OR IGNORE INTO t_commit (commit_id, sub_project_id, committer, commit_msg, commit_date) VALUES (?, ?, ?, ?, ?)
+  `).run(commitId, subProjectId, committer, commitMsg, commitDate);
 }
 
 function getCommitDetail(commitId) {
@@ -206,6 +220,97 @@ function getUserCredentials() {
   return result;
 }
 
+function deleteUserCredentials() {
+  db.prepare(`DELETE FROM t_user_credentials`).run();
+}
+
+// UUID로 서브프로젝트 조회
+function getSubProjectByUuid(uuid) {
+  const result = db.prepare(`
+    SELECT * FROM t_sub_project WHERE sub_project_uuid = ?
+  `).get(uuid);
+  return result;
+}
+
+// 서브프로젝트의 커밋 목록 조회 (최신순)
+function getCommitsBySubProjectUuid(uuid, limit = 100) {
+  const subProject = getSubProjectByUuid(uuid);
+  if (!subProject) return [];
+
+  const result = db.prepare(`
+    SELECT * FROM t_commit
+    WHERE sub_project_id = ?
+    ORDER BY commit_date DESC
+    LIMIT ?
+  `).all(subProject.sub_project_id, limit);
+  return result;
+}
+
+// 특정 파일이 포함된 커밋 조회
+function getCommitsByFile(uuid, fileName) {
+  const subProject = getSubProjectByUuid(uuid);
+  if (!subProject) return [];
+
+  const result = db.prepare(`
+    SELECT DISTINCT c.* FROM t_commit c
+    JOIN t_commit_detail cd ON c.commit_id = cd.commit_id
+    WHERE c.sub_project_id = ? AND cd.commit_file LIKE ?
+    ORDER BY c.commit_date DESC
+  `).all(subProject.sub_project_id, `%${fileName}%`);
+  return result;
+}
+
+// 서브프로젝트의 작성자 목록 조회
+function getAuthorsBySubProjectUuid(uuid) {
+  const subProject = getSubProjectByUuid(uuid);
+  if (!subProject) return [];
+
+  const result = db.prepare(`
+    SELECT DISTINCT committer FROM t_commit
+    WHERE sub_project_id = ?
+    ORDER BY committer
+  `).all(subProject.sub_project_id);
+  return result.map(r => r.committer);
+}
+
+// 작성자로 필터링한 커밋 조회
+function getCommitsByAuthor(uuid, author) {
+  const subProject = getSubProjectByUuid(uuid);
+  if (!subProject) return [];
+
+  const result = db.prepare(`
+    SELECT * FROM t_commit
+    WHERE sub_project_id = ? AND committer = ?
+    ORDER BY commit_date DESC
+  `).all(subProject.sub_project_id, author);
+  return result;
+}
+
+// 커밋과 상세 정보를 함께 저장
+function saveCommitWithDetails(commitId, subProjectUuid, committer, commitMsg, commitDate, files) {
+  const subProject = getSubProjectByUuid(subProjectUuid);
+  if (!subProject) return;
+
+  const transaction = db.transaction(() => {
+    // 커밋 저장
+    insertCommit(commitId, subProject.sub_project_id, committer, commitMsg, commitDate);
+    
+    // 기존 파일 상세 정보 삭제
+    db.prepare(`DELETE FROM t_commit_detail WHERE commit_id = ?`).run(commitId);
+    
+    // 파일 상세 정보 저장
+    const insertDetail = db.prepare(`
+      INSERT INTO t_commit_detail (commit_id, commit_file, commit_content) VALUES (?, ?, ?)
+    `);
+    
+    for (const file of files) {
+      insertDetail.run(commitId, file.path, file.diff || '');
+    }
+  });
+
+  transaction();
+}
+
 export {
   init,
   getProjectList,
@@ -218,7 +323,14 @@ export {
   insertCommitDetail,
   saveUserCredentials,
   getUserCredentials,
+  deleteUserCredentials,
   clearAllData,
   saveProjectsData,
-  getLastUpdateTime
+  getLastUpdateTime,
+  getSubProjectByUuid,
+  getCommitsBySubProjectUuid,
+  getCommitsByFile,
+  getAuthorsBySubProjectUuid,
+  getCommitsByAuthor,
+  saveCommitWithDetails
 }
