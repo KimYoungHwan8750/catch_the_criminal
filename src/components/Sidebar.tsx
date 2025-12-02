@@ -13,6 +13,7 @@ export type SubProjects = {
   project_id: number;
   sub_project_id: number;
   sub_project_name: string;
+  sub_project_uuid: string;
 }
 
 
@@ -127,6 +128,7 @@ function Sidebar() {
                             projectName={project['project_name']}
                             searchTerm={searchTerm}
                             isProjectNameMatch={isProjectNameMatch}
+                            subProjects={project.sub_projects}
                         />
                     );
                 })}

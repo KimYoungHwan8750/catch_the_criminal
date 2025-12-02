@@ -8,39 +8,38 @@ type ItemProps = {
     projectName: string;
     searchTerm?: string;
     isProjectNameMatch?: boolean;
+    subProjects?: SubProjects[];
 }
 
-function Item({ title, projectName: projectName, searchTerm = "", isProjectNameMatch = false }: ItemProps) {
+function Item({ title, projectName: projectName, searchTerm = "", isProjectNameMatch = false, subProjects = [] }: ItemProps) {
     const navigate = useNavigate();
     const [isOpen, setIsOpen] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
     const [subProjectList, setSubProjectList] = useState<SubProjects[]>([]);
 
+    // props로 받은 데이터가 있으면 사용, 없으면 IPC로 가져오기
     useEffect(() => {
-      getSubProjectList(projectName);
-    }, [projectName]);
+        if (subProjects && subProjects.length > 0) {
+            setSubProjectList(subProjects);
+        } else if (projectName) {
+            getSubProjectList(projectName);
+        }
+    }, [projectName, subProjects.length]);
 
     function getSubProjectList(projectName: string) {
-      const unsubscribe = window.electron.ipcRenderer.on('get-sub-project-list', (data: any) => {
-        setSubProjectList([...data]);
-      });
-      window.electron.ipcRenderer.sendMessage('get-sub-project-list', [projectName]);
-      return () => {
-        if (unsubscribe) {
-            unsubscribe();
+        const unsubscribe = window.electron.ipcRenderer.on('get-sub-project-list', (data: any) => {
+            setSubProjectList([...data]);
+        });
+        window.electron.ipcRenderer.sendMessage('get-sub-project-list', [projectName]);
+        return () => {
+            if (unsubscribe) {
+                unsubscribe();
+            }
         }
-      }
     }
 
     const handleToggle = () => {
-        const content = contentRef.current;
-        if (!content) return;
-
-        if (!isOpen) {
-            content.style.height = content.scrollHeight + 'px';
-        } else {
-            content.style.height = '0px';
-        }
+        if (subProjectList.length === 0) return; // 데이터 로드 전에는 토글 안 함
         setIsOpen(!isOpen);
     };
 
@@ -51,36 +50,44 @@ function Item({ title, projectName: projectName, searchTerm = "", isProjectNameM
             sub.sub_project_name.toLowerCase().includes(searchTerm.toLowerCase())
         );
 
-    // 검색어가 있고 필터링된 서브프로젝트가 있으면 자동으로 열기
+    // 검색어가 있고 필터링된 서브프로젝트가 있으면 자동으로 열기/닫기
+    useEffect(() => {
+        if (searchTerm && filteredSubProjects.length > 0 && !isOpen) {
+            setIsOpen(true);
+        } else if (searchTerm && filteredSubProjects.length === 0 && isOpen) {
+            setIsOpen(false);
+        }
+    }, [searchTerm, filteredSubProjects.length, isOpen]);
+
+    // isOpen 상태나 filteredSubProjects가 변경되면 높이 재계산
     useEffect(() => {
         const content = contentRef.current;
         if (!content) return;
 
-        if (searchTerm && filteredSubProjects.length > 0 && !isOpen) {
-            setIsOpen(true);
-            // DOM 업데이트 후 높이 계산
-            requestAnimationFrame(() => {
-                if (content) {
-                    content.style.height = content.scrollHeight + 'px';
-                }
-            });
-        } else if (searchTerm && filteredSubProjects.length === 0 && isOpen) {
+        if (!isOpen) {
+            // 닫힐 때
             content.style.height = '0px';
-            setIsOpen(false);
+        } else if (filteredSubProjects.length > 0) {
+            // 열릴 때 - 높이를 auto로 임시 설정하여 실제 높이 측정
+            content.style.transition = 'none'; // 임시로 transition 제거
+            content.style.height = 'auto';
+            
+            const timer = setTimeout(() => {
+                if (content) {
+                    const height = content.offsetHeight; // offsetHeight 사용
+                    content.style.height = '0px';
+                    content.style.transition = ''; // transition 복원
+                    
+                    // 다음 프레임에서 높이 적용
+                    requestAnimationFrame(() => {
+                        content.style.height = height + 'px';
+                    });
+                }
+            }, 0);
+            
+            return () => clearTimeout(timer);
         }
-    }, [searchTerm, filteredSubProjects.length]);
-
-    // isOpen이 true일 때 filteredSubProjects가 변경되면 높이 재계산
-    useEffect(() => {
-        const content = contentRef.current;
-        if (!content || !isOpen) return;
-
-        requestAnimationFrame(() => {
-            if (content) {
-                content.style.height = content.scrollHeight + 'px';
-            }
-        });
-    }, [filteredSubProjects.length, isOpen]);
+    }, [isOpen, filteredSubProjects.length]);
 
     // 검색어가 있고 매칭되는 서브프로젝트가 없으면 프로젝트 자체를 숨김
     // 단, 프로젝트 이름이 매칭되는 경우는 제외

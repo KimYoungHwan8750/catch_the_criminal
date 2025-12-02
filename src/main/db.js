@@ -91,6 +91,20 @@ function init() {
     } catch (error) {
         console.error('Migration error:', error);
     }
+
+    // 마이그레이션: t_commit 테이블에 branch 컬럼 추가
+    try {
+        const commitColumns = db.prepare("PRAGMA table_info(t_commit)").all();
+        const hasBranchColumn = commitColumns.some(col => col.name === 'branch');
+
+        if (!hasBranchColumn) {
+            console.log('Adding branch column to t_commit table...');
+            db.exec('ALTER TABLE t_commit ADD COLUMN branch TEXT DEFAULT "master"');
+            console.log('Branch column added successfully');
+        }
+    } catch (error) {
+        console.error('Migration error:', error);
+    }
 }
 
 function getDb() {
@@ -101,11 +115,26 @@ function getDb() {
 }
 
 function getProjectList() {
-  const result = db.prepare(`
+  const projects = db.prepare(`
     SELECT *
     FROM t_project p
   `).all();
-    return result;
+  
+  // 각 프로젝트에 서브프로젝트 목록 추가
+  const projectsWithSubs = projects.map(project => {
+    const subProjects = db.prepare(`
+      SELECT *
+      FROM t_sub_project sp
+      WHERE sp.project_name = ?
+    `).all(project.project_name);
+    
+    return {
+      ...project,
+      sub_projects: subProjects
+    };
+  });
+  
+  return projectsWithSubs;
 }
 
 function insertProject(projectName) {
@@ -183,10 +212,10 @@ function getCommitList(subProjectId) {
     return result;
 }
 
-function insertCommit(commitId, subProjectId, committer, commitMsg, commitDate = null) {
+function insertCommit(commitId, subProjectId, committer, commitMsg, commitDate = null, branch = 'master') {
   db.prepare(`
-    INSERT OR IGNORE INTO t_commit (commit_id, sub_project_id, committer, commit_msg, commit_date) VALUES (?, ?, ?, ?, ?)
-  `).run(commitId, subProjectId, committer, commitMsg, commitDate);
+    INSERT OR IGNORE INTO t_commit (commit_id, sub_project_id, committer, commit_msg, commit_date, branch) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(commitId, subProjectId, committer, commitMsg, commitDate, branch);
 }
 
 function getCommitDetail(commitId) {
@@ -232,68 +261,104 @@ function getSubProjectByUuid(uuid) {
   return result;
 }
 
-// 서브프로젝트의 커밋 목록 조회 (최신순)
-function getCommitsBySubProjectUuid(uuid, limit = 100) {
+// 서브프로젝트의 커밋 목록 조회 (최신순, 브랜치 필터링)
+function getCommitsBySubProjectUuid(uuid, branch = null, limit = 100) {
   const subProject = getSubProjectByUuid(uuid);
   if (!subProject) return [];
 
-  const result = db.prepare(`
+  let query = `
     SELECT * FROM t_commit
     WHERE sub_project_id = ?
-    ORDER BY commit_date DESC
-    LIMIT ?
-  `).all(subProject.sub_project_id, limit);
+  `;
+  const params = [subProject.sub_project_id];
+
+  if (branch) {
+    query += ` AND branch = ?`;
+    params.push(branch);
+  }
+
+  query += ` ORDER BY commit_date DESC LIMIT ?`;
+  params.push(limit);
+
+  const result = db.prepare(query).all(...params);
   return result;
 }
 
-// 특정 파일이 포함된 커밋 조회
-function getCommitsByFile(uuid, fileName) {
+// 특정 파일이 포함된 커밋 조회 (브랜치 필터링)
+function getCommitsByFile(uuid, fileName, branch = null) {
   const subProject = getSubProjectByUuid(uuid);
   if (!subProject) return [];
 
-  const result = db.prepare(`
+  let query = `
     SELECT DISTINCT c.* FROM t_commit c
     JOIN t_commit_detail cd ON c.commit_id = cd.commit_id
     WHERE c.sub_project_id = ? AND cd.commit_file LIKE ?
-    ORDER BY c.commit_date DESC
-  `).all(subProject.sub_project_id, `%${fileName}%`);
+  `;
+  const params = [subProject.sub_project_id, `%${fileName}%`];
+
+  if (branch) {
+    query += ` AND c.branch = ?`;
+    params.push(branch);
+  }
+
+  query += ` ORDER BY c.commit_date DESC`;
+
+  const result = db.prepare(query).all(...params);
   return result;
 }
 
-// 서브프로젝트의 작성자 목록 조회
-function getAuthorsBySubProjectUuid(uuid) {
+// 서브프로젝트의 작성자 목록 조회 (브랜치 필터링)
+function getAuthorsBySubProjectUuid(uuid, branch = null) {
   const subProject = getSubProjectByUuid(uuid);
   if (!subProject) return [];
 
-  const result = db.prepare(`
+  let query = `
     SELECT DISTINCT committer FROM t_commit
     WHERE sub_project_id = ?
-    ORDER BY committer
-  `).all(subProject.sub_project_id);
+  `;
+  const params = [subProject.sub_project_id];
+
+  if (branch) {
+    query += ` AND branch = ?`;
+    params.push(branch);
+  }
+
+  query += ` ORDER BY committer`;
+
+  const result = db.prepare(query).all(...params);
   return result.map(r => r.committer);
 }
 
-// 작성자로 필터링한 커밋 조회
-function getCommitsByAuthor(uuid, author) {
+// 작성자로 필터링한 커밋 조회 (브랜치 필터링)
+function getCommitsByAuthor(uuid, author, branch = null) {
   const subProject = getSubProjectByUuid(uuid);
   if (!subProject) return [];
 
-  const result = db.prepare(`
+  let query = `
     SELECT * FROM t_commit
     WHERE sub_project_id = ? AND committer = ?
-    ORDER BY commit_date DESC
-  `).all(subProject.sub_project_id, author);
+  `;
+  const params = [subProject.sub_project_id, author];
+
+  if (branch) {
+    query += ` AND branch = ?`;
+    params.push(branch);
+  }
+
+  query += ` ORDER BY commit_date DESC`;
+
+  const result = db.prepare(query).all(...params);
   return result;
 }
 
 // 커밋과 상세 정보를 함께 저장
-function saveCommitWithDetails(commitId, subProjectUuid, committer, commitMsg, commitDate, files) {
+function saveCommitWithDetails(commitId, subProjectUuid, committer, commitMsg, commitDate, files, branch = 'master') {
   const subProject = getSubProjectByUuid(subProjectUuid);
   if (!subProject) return;
 
   const transaction = db.transaction(() => {
     // 커밋 저장
-    insertCommit(commitId, subProject.sub_project_id, committer, commitMsg, commitDate);
+    insertCommit(commitId, subProject.sub_project_id, committer, commitMsg, commitDate, branch);
     
     // 기존 파일 상세 정보 삭제
     db.prepare(`DELETE FROM t_commit_detail WHERE commit_id = ?`).run(commitId);
@@ -309,6 +374,19 @@ function saveCommitWithDetails(commitId, subProjectUuid, committer, commitMsg, c
   });
 
   transaction();
+}
+
+// 특정 브랜치에 커밋 ID가 이미 존재하는지 확인
+function hasCommitInBranch(uuid, commitId, branch) {
+  const subProject = getSubProjectByUuid(uuid);
+  if (!subProject) return false;
+
+  const result = db.prepare(`
+    SELECT COUNT(*) as count FROM t_commit
+    WHERE sub_project_id = ? AND commit_id = ? AND branch = ?
+  `).get(subProject.sub_project_id, commitId, branch);
+  
+  return result && result.count > 0;
 }
 
 export {
@@ -332,5 +410,6 @@ export {
   getCommitsByFile,
   getAuthorsBySubProjectUuid,
   getCommitsByAuthor,
-  saveCommitWithDetails
+  saveCommitWithDetails,
+  hasCommitInBranch
 }

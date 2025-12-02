@@ -13,7 +13,9 @@ import {
   getAuthorsBySubProjectUuid,
   getCommitsByAuthor,
   saveCommitWithDetails,
-  getCommitDetail
+  getCommitDetail,
+  insertCommit,
+  hasCommitInBranch
 } from "./db";
 import { 
   getPage, 
@@ -157,17 +159,17 @@ function initIpc() {
   });
 
   // 커밋 목록 조회 (DB에서)
-  ipcMain.on('get-commits-from-db', async (event, arg: { uuid: string, fileName?: string, author?: string }) => {
+  ipcMain.on('get-commits-from-db', async (event, arg: { uuid: string, fileName?: string, author?: string, branch?: string }) => {
     try {
-      const { uuid, fileName, author } = arg;
+      const { uuid, fileName, author, branch } = arg;
       
       let commits;
       if (fileName) {
-        commits = getCommitsByFile(uuid, fileName);
+        commits = getCommitsByFile(uuid, fileName, branch);
       } else if (author) {
-        commits = getCommitsByAuthor(uuid, author);
+        commits = getCommitsByAuthor(uuid, author, branch);
       } else {
-        commits = getCommitsBySubProjectUuid(uuid);
+        commits = getCommitsBySubProjectUuid(uuid, branch);
       }
       
       event.reply('get-commits-from-db', commits);
@@ -177,36 +179,46 @@ function initIpc() {
     }
   });
 
-  // 커밋 크롤링 및 저장
+  // 커밋 크롤링 및 저장 (기본 정보만, 캐싱 지원)
   ipcMain.on('crawl-commits', async (event, arg: { uuid: string, branch?: string }) => {
     try {
       const { uuid, branch = 'master' } = arg;
       console.log(`Crawling commits for ${uuid}, branch: ${branch}`);
       
-      const commits = await getCommits(uuid, branch);
-      console.log(`Crawled ${commits.length} commits`);
+      const subProject = getSubProjectByUuid(uuid);
+      if (!subProject) {
+        throw new Error('SubProject not found');
+      }
+
+      // 캐싱 체크 함수: 이 브랜치에 이미 있는 커밋인지 확인
+      const checkExisting = (commitId: string) => {
+        return hasCommitInBranch(uuid, commitId, branch);
+      };
+
+      // 커밋 크롤링 (캐싱 지원)
+      const commits = await getCommits(uuid, branch, checkExisting);
+      console.log(`Crawled ${commits.length} NEW commits for branch ${branch}`);
       
-      // 각 커밋의 상세 정보 크롤링
+      // 커밋 기본 정보만 저장 (빠름)
       let savedCount = 0;
       for (const commit of commits) {
         try {
-          const detail = await crawlCommitDetail(uuid, commit.commitId);
-          saveCommitWithDetails(
-            detail.commitId,
-            uuid,
-            detail.author,
-            detail.message,
-            detail.date,
-            detail.files
+          insertCommit(
+            commit.commitId,
+            subProject.sub_project_id,
+            commit.author,
+            commit.message,
+            commit.date,
+            branch
           );
           savedCount++;
         } catch (error) {
-          console.error(`Error crawling commit ${commit.commitId}:`, error);
+          console.error(`Error saving commit ${commit.commitId}:`, error);
         }
       }
       
-      console.log(`Successfully saved ${savedCount} commits`);
-      event.reply('crawl-commits', { success: true, count: savedCount });
+      console.log(`Successfully saved ${savedCount} commits to branch ${branch}`);
+      event.reply('crawl-commits', { success: true, count: savedCount, branch });
     } catch (error) {
       console.error('Error crawling commits:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -215,9 +227,10 @@ function initIpc() {
   });
 
   // 작성자 목록 조회 (DB에서)
-  ipcMain.on('get-authors-from-db', async (event, uuid: string) => {
+  ipcMain.on('get-authors-from-db', async (event, arg: { uuid: string, branch?: string }) => {
     try {
-      const authors = getAuthorsBySubProjectUuid(uuid);
+      const { uuid, branch } = arg;
+      const authors = getAuthorsBySubProjectUuid(uuid, branch);
       event.reply('get-authors-from-db', authors);
     } catch (error) {
       console.error('Error getting authors from DB:', error);
@@ -247,11 +260,29 @@ function initIpc() {
     }
   });
 
-  // 커밋 상세 정보 크롤링
-  ipcMain.on('crawl-commit-detail', async (event, arg: { uuid: string, commitId: string }) => {
+  // 커밋 상세 정보 크롤링 및 저장
+  ipcMain.on('crawl-commit-detail', async (event, arg: { uuid: string, commitId: string, branch?: string }) => {
     try {
-      const { uuid, commitId } = arg;
+      const { uuid, commitId, branch = 'master' } = arg;
       const detail = await crawlCommitDetail(uuid, commitId);
+      
+      // DB에 저장
+      if (detail && detail.files) {
+        const subProject = getSubProjectByUuid(uuid);
+        if (subProject) {
+          saveCommitWithDetails(
+            detail.commitId,
+            uuid,
+            detail.author,
+            detail.message,
+            detail.date,
+            detail.files,
+            branch
+          );
+          console.log(`Saved commit detail for ${commitId} (branch: ${branch})`);
+        }
+      }
+      
       event.reply('crawl-commit-detail', detail);
     } catch (error) {
       console.error('Error crawling commit detail:', error);

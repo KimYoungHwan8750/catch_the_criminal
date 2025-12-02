@@ -42,32 +42,53 @@ function Main() {
 
   useEffect(() => {
     if (uuid) {
-      // 자동 크롤링 시작
-      startAutoCrawl();
+      console.log('[Main] UUID changed:', uuid);
+      // 상태 초기화
+      setCommits([]);
+      setAuthors([]);
+      setSelectedAuthor('');
+      setFileNameFilter('');
+      setBranches([]);
+      setSelectedBranch('');
+      // 브랜치 로드 요청
+      window.electron.ipcRenderer.sendMessage('get-branches', uuid);
     }
   }, [uuid]);
 
   useEffect(() => {
-    if (uuid && (selectedAuthor || fileNameFilter)) {
+    if (uuid && selectedBranch && (selectedAuthor || fileNameFilter)) {
       loadCommits();
     }
-  }, [selectedAuthor, fileNameFilter]);
+  }, [selectedAuthor, fileNameFilter, selectedBranch, uuid]);
 
-  const startAutoCrawl = async () => {
-    if (!uuid) return;
+  const handleBranchChange = (branchName: string) => {
+    if (branchName !== selectedBranch) {
+      setSelectedBranch(branchName);
+    }
+  };
 
-    setIsCrawling(true);
+  // IPC 리스너 등록 (컴포넌트 마운트 시 한 번만)
+  useEffect(() => {
+    console.log('[Main] Registering IPC listeners');
 
-    // 브랜치 로드
-    loadBranches();
-
-    // 커밋 크롤링
-    window.electron.ipcRenderer.sendMessage('crawl-commits', {
-      uuid,
-      branch: selectedBranch
+    // 브랜치 목록 수신
+    const unsubBranches = window.electron.ipcRenderer.on('get-branches', (data: any) => {
+      console.log('[Main] Received branches:', data);
+      if (data && data.length > 0) {
+        setBranches(data);
+        const defaultBranch = data.find((b: Branch) => b.isDefault);
+        const branchToSelect = defaultBranch?.name || data[0].name;
+        console.log('[Main] Setting selected branch to:', branchToSelect);
+        setSelectedBranch(branchToSelect);
+      } else {
+        setBranches([{ name: 'master', isDefault: true }]);
+        setSelectedBranch('master');
+      }
     });
 
-    window.electron.ipcRenderer.on('crawl-commits', (result: any) => {
+    // 커밋 크롤링 결과 수신
+    const unsubCrawl = window.electron.ipcRenderer.on('crawl-commits', (result: any) => {
+      console.log('[Main] Crawl result:', result);
       setIsCrawling(false);
       if (result.success) {
         console.log(`Successfully crawled ${result.count} commits`);
@@ -75,67 +96,80 @@ function Main() {
         loadAuthors();
       } else {
         console.error('Crawl failed:', result.error);
-        // 크롤링 실패해도 DB에서 로드 시도
         loadCommits();
         loadAuthors();
       }
     });
-  };
 
-  const loadBranches = () => {
-    if (!uuid) return;
+    return () => {
+      console.log('[Main] Cleaning up IPC listeners');
+      if (unsubBranches) unsubBranches();
+      if (unsubCrawl) unsubCrawl();
+    };
+  }, []);
 
-    window.electron.ipcRenderer.sendMessage('get-branches', uuid);
-    window.electron.ipcRenderer.on('get-branches', (data: any) => {
-      if (data && data.length > 0) {
-        setBranches(data);
-        // 기본 브랜치 설정
-        const defaultBranch = data.find((b: Branch) => b.isDefault);
-        if (defaultBranch) {
-          setSelectedBranch(defaultBranch.name);
-        } else if (data.length > 0) {
-          setSelectedBranch(data[0].name);
-        }
-      } else {
-        setBranches([{ name: 'master', isDefault: true }]);
-        setSelectedBranch('master');
-      }
-    });
-  };
+  // 브랜치 선택 시 커밋 크롤링 시작
+  useEffect(() => {
+    if (!uuid || !selectedBranch) {
+      console.log('[Main] Skipping crawl - missing uuid or branch:', { uuid, selectedBranch });
+      return;
+    }
 
-  const loadAuthors = () => {
-    window.electron.ipcRenderer.sendMessage('get-authors-from-db', uuid);
-    window.electron.ipcRenderer.on('get-authors-from-db', (data: any) => {
-      if (data && data.length > 0) {
-        setAuthors(data);
-      } else {
-        // DB에 없으면 크롤링
-        window.electron.ipcRenderer.sendMessage('crawl-authors', uuid);
-      }
-    });
+    if (isCrawling) {
+      console.log('[Main] Already crawling, skipping');
+      return;
+    }
 
-    window.electron.ipcRenderer.on('crawl-authors', (data: any) => {
-      if (data) {
-        setAuthors(data);
-      }
-    });
-  };
+    console.log(`[Main] Starting crawl for branch: ${selectedBranch}`);
+    setIsCrawling(true);
 
-  const loadCommits = () => {
-    if (!uuid) return;
-
-    window.electron.ipcRenderer.sendMessage('get-commits-from-db', {
+    window.electron.ipcRenderer.sendMessage('crawl-commits', {
       uuid,
-      fileName: fileNameFilter || undefined,
-      author: selectedAuthor || undefined
+      branch: selectedBranch
+    });
+  }, [selectedBranch, uuid]);
+
+  // 작성자 및 커밋 목록 IPC 리스너 (한 번만 등록)
+  useEffect(() => {
+    const unsubAuthors = window.electron.ipcRenderer.on('get-authors-from-db', (data: any) => {
+      if (data && data.length > 0) {
+        setAuthors(data);
+      } else {
+        setAuthors([]);
+      }
     });
 
-    window.electron.ipcRenderer.on('get-commits-from-db', (data: any) => {
+    const unsubCommits = window.electron.ipcRenderer.on('get-commits-from-db', (data: any) => {
       if (data && data.length > 0) {
         setCommits(data);
       } else {
         setCommits([]);
       }
+    });
+
+    return () => {
+      if (unsubAuthors) unsubAuthors();
+      if (unsubCommits) unsubCommits();
+    };
+  }, []);
+
+  const loadAuthors = () => {
+    if (!uuid || !selectedBranch) return;
+
+    window.electron.ipcRenderer.sendMessage('get-authors-from-db', {
+      uuid,
+      branch: selectedBranch
+    });
+  };
+
+  const loadCommits = () => {
+    if (!uuid || !selectedBranch) return;
+
+    window.electron.ipcRenderer.sendMessage('get-commits-from-db', {
+      uuid,
+      fileName: fileNameFilter || undefined,
+      author: selectedAuthor || undefined,
+      branch: selectedBranch
     });
   };
 
@@ -143,11 +177,37 @@ function Main() {
   const handleCommitClick = (commit: Commit) => {
     setSelectedCommit(commit);
 
+    // 먼저 DB에서 조회
     window.electron.ipcRenderer.sendMessage('get-commit-detail-from-db', commit.commit_id);
     window.electron.ipcRenderer.on('get-commit-detail-from-db', (data: any) => {
-      if (data) {
+      if (data && data.length > 0) {
+        // DB에 있으면 바로 표시
         setCommitFiles(data);
         setShowModal(true);
+      } else {
+        // DB에 없으면 크롤링
+        console.log('Commit detail not in DB, crawling...');
+        window.electron.ipcRenderer.sendMessage('crawl-commit-detail', {
+          uuid,
+          commitId: commit.commit_id,
+          branch: selectedBranch
+        });
+
+        window.electron.ipcRenderer.on('crawl-commit-detail', (detail: any) => {
+          if (detail && detail.files) {
+            // 크롤링한 데이터를 DB에 저장
+            const files = detail.files.map((file: any) => ({
+              commit_id: commit.commit_id,
+              commit_file: file.path,
+              commit_content: file.diff
+            }));
+            setCommitFiles(files);
+            setShowModal(true);
+
+            // DB에 저장 (다음에는 빠르게 로드하기 위해)
+            // saveCommitWithDetails 호출 필요
+          }
+        });
       }
     });
   };
@@ -202,7 +262,7 @@ function Main() {
             <Label>브랜치</Label>
             <Select
               value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
+              onChange={(e) => handleBranchChange(e.target.value)}
             >
               {branches.map((branch, idx) => (
                 <option key={idx} value={branch.name}>

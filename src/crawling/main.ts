@@ -189,23 +189,49 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
 
     const branches = await page.evaluate(() => {
       const branchNav = document.querySelector('nav.branches');
-      if (!branchNav) return [{ name: 'master', isDefault: true }];
+      if (!branchNav) {
+        console.log('[Branch Parse] No nav.branches found');
+        return [{ name: 'master', isDefault: true }];
+      }
 
-      const branchLinks = branchNav.querySelectorAll('li.branch a');
+      // HTML 구조: nav.branches > ul > li > a.branch (현재 브랜치)
+      //                                  > ul > li.branch (브랜치 목록)
+      // 중첩된 ul 안에 실제 브랜치 목록이 있음
+      const outerUl = branchNav.querySelector('ul');
+      if (!outerUl) {
+        console.log('[Branch Parse] No outer ul found');
+        return [{ name: 'master', isDefault: true }];
+      }
+
+      const nestedUl = outerUl.querySelector('ul');
+      if (!nestedUl) {
+        console.log('[Branch Parse] No nested ul found');
+        return [{ name: 'master', isDefault: true }];
+      }
+
+      const branchItems = nestedUl.querySelectorAll('li.branch');
+      console.log(`[Branch Parse] Found ${branchItems.length} branch items`);
+      
       const branches: any[] = [];
 
-      branchLinks.forEach(link => {
-        const name = link.textContent?.trim() || '';
-        const isDefault = link.closest('li')?.classList.contains('active') || false;
-        
-        if (name) {
-          branches.push({ name, isDefault });
+      branchItems.forEach(li => {
+        const link = li.querySelector('a');
+        if (link) {
+          const name = link.textContent?.trim() || '';
+          const isDefault = li.classList.contains('active');
+          
+          if (name) {
+            console.log(`[Branch Parse] Branch: ${name}, isDefault: ${isDefault}`);
+            branches.push({ name, isDefault });
+          }
         }
       });
 
+      console.log(`[Branch Parse] Total branches parsed: ${branches.length}`);
       return branches.length > 0 ? branches : [{ name: 'master', isDefault: true }];
     });
 
+    console.log('Found branches:', branches);
     return branches;
   } catch (error) {
     console.error('Get branches error:', error);
@@ -213,16 +239,21 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
   }
 }
 
-// 커밋 목록 조회 (모든 페이지)
-async function getCommits(subProjectUuid: string, branch: string = 'master'): Promise<Commit[]> {
+// 커밋 목록 조회 (모든 페이지, 캐싱 지원)
+async function getCommits(
+  subProjectUuid: string, 
+  branch: string = 'master',
+  checkExistingCommit?: (commitId: string) => boolean
+): Promise<Commit[]> {
   if (!page) throw new Error('Page not initialized');
 
   try {
     const allCommits: Commit[] = [];
     let currentPage = 1;
     let hasMorePages = true;
+    let cacheHit = false;
 
-    while (hasMorePages) {
+    while (hasMorePages && !cacheHit) {
       // URL 형식: /Repository/{uuid}/{branch}/Commits?page={page}
       const url = currentPage === 1 
         ? `http://git.wnpsoft.co.kr/Repository/${subProjectUuid}/${branch}/Commits`
@@ -261,9 +292,20 @@ async function getCommits(subProjectUuid: string, branch: string = 'master'): Pr
       });
 
       if (commits.length > 0) {
-        allCommits.push(...commits);
-        console.log(`Page ${currentPage}: Found ${commits.length} commits (Total: ${allCommits.length})`);
-        currentPage++;
+        // 캐싱 체크: DB에 이미 있는 커밋이 나오면 중단
+        for (const commit of commits) {
+          if (checkExistingCommit && checkExistingCommit(commit.commitId)) {
+            console.log(`✓ Cache hit at commit ${commit.commitId}. Stopping crawl.`);
+            cacheHit = true;
+            break;
+          }
+          allCommits.push(commit);
+        }
+
+        if (!cacheHit) {
+          console.log(`Page ${currentPage}: Found ${commits.length} commits (Total: ${allCommits.length})`);
+          currentPage++;
+        }
       } else {
         // 더 이상 커밋이 없으면 종료
         hasMorePages = false;
@@ -271,7 +313,7 @@ async function getCommits(subProjectUuid: string, branch: string = 'master'): Pr
       }
     }
 
-    console.log(`Total commits fetched: ${allCommits.length}`);
+    console.log(`Total NEW commits fetched: ${allCommits.length}${cacheHit ? ' (stopped at cached commit)' : ''}`);
     return allCommits;
   } catch (error) {
     console.error('Get commits error:', error);
@@ -284,8 +326,12 @@ async function getCommitDetail(subProjectUuid: string, commitId: string): Promis
   if (!page) throw new Error('Page not initialized');
 
   try {
-    await page.goto(`http://git.wnpsoft.co.kr/Repository/Commit/${subProjectUuid}?commit=${commitId}`);
-    await page.waitForLoadState('networkidle');
+    await page.goto(`http://git.wnpsoft.co.kr/Repository/Commit/${subProjectUuid}?commit=${commitId}`, {
+      timeout: 60000 // 60초로 증가
+    });
+    await page.waitForLoadState('networkidle', {
+      timeout: 60000 // 60초로 증가
+    });
 
     const commitDetail = await page.evaluate(() => {
       const messageElement = document.querySelector('.commit h2 a');
