@@ -178,16 +178,45 @@ interface CommitFile {
   diff: string;
 }
 
-// 브랜치 목록 조회
+// 한글 날짜 형식을 ISO 형식으로 변환
+// "2025-12-03 오전 11:00:29" → "2025-12-03 11:00:29"
+// "2025-12-03 오후 1:00:00" → "2025-12-03 13:00:00"
+function convertKoreanDateToISO(koreanDate: string): string {
+  if (!koreanDate) return '';
+  
+  const match = koreanDate.match(/(\d{4})-(\d{2})-(\d{2})\s+(오전|오후)\s+(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!match) return koreanDate; // 변환 실패 시 원본 반환
+  
+  const [_, year, month, day, ampm, hour, minute, second] = match;
+  let hour24 = parseInt(hour, 10);
+  
+  if (ampm === '오후' && hour24 !== 12) {
+    hour24 += 12;
+  } else if (ampm === '오전' && hour24 === 12) {
+    hour24 = 0;
+  }
+  
+  return `${year}-${month}-${day} ${hour24.toString().padStart(2, '0')}:${minute}:${second}`;
+}
+
+// 브랜치 목록 조회 (별도 페이지 사용)
 async function getBranches(subProjectUuid: string): Promise<Branch[]> {
-  if (!page) throw new Error('Page not initialized');
+  if (!context) throw new Error('Browser context not initialized');
 
+  let branchPage: Page | null = null;
+  
   try {
-    // 커밋 페이지로 이동 (master 브랜치 기본)
-    await page.goto(`http://git.wnpsoft.co.kr/Repository/${subProjectUuid}/master/Commits`);
-    await page.waitForLoadState('networkidle');
+    // 새로운 페이지 생성 (전역 page와 충돌 방지)
+    branchPage = await context.newPage();
+    console.log('[getBranches] Created new page for branch fetching');
 
-    const branches = await page.evaluate(() => {
+    // 커밋 페이지로 이동 (master 브랜치 기본)
+    await branchPage.goto(`http://git.wnpsoft.co.kr/Repository/${subProjectUuid}/master/Commits`, {
+      timeout: 30000
+    });
+    await branchPage.waitForLoadState('networkidle', { timeout: 30000 });
+
+    const branches = await branchPage.evaluate(() => {
       const branchNav = document.querySelector('nav.branches');
       if (!branchNav) {
         console.log('[Branch Parse] No nav.branches found');
@@ -236,6 +265,12 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
   } catch (error) {
     console.error('Get branches error:', error);
     return [{ name: 'master', isDefault: true }];
+  } finally {
+    // 사용 완료 후 페이지 닫기
+    if (branchPage) {
+      await branchPage.close();
+      console.log('[getBranches] Closed branch page');
+    }
   }
 }
 
@@ -243,7 +278,8 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
 async function getCommits(
   subProjectUuid: string, 
   branch: string = 'master',
-  checkExistingCommit?: (commitId: string) => boolean
+  checkExistingCommit?: (commitId: string) => boolean,
+  onProgress?: (current: number, total: number | null) => void
 ): Promise<Commit[]> {
   if (!page) throw new Error('Page not initialized');
 
@@ -252,6 +288,7 @@ async function getCommits(
     let currentPage = 1;
     let hasMorePages = true;
     let cacheHit = false;
+    let totalPages: number | null = null;
 
     while (hasMorePages && !cacheHit) {
       // URL 형식: /Repository/{uuid}/{branch}/Commits?page={page}
@@ -260,8 +297,55 @@ async function getCommits(
         : `http://git.wnpsoft.co.kr/Repository/${subProjectUuid}/${branch}/Commits?page=${currentPage}`;
       
       console.log(`Fetching page ${currentPage}: ${url}`);
+      
+      // 진행 상황 전송
+      if (onProgress) {
+        onProgress(currentPage, totalPages);
+      }
+      
       await page.goto(url);
       await page.waitForLoadState('networkidle');
+
+      // 첫 페이지에서 전체 페이지 수 파싱
+      if (currentPage === 1 && totalPages === null) {
+        totalPages = await page.evaluate(() => {
+          const tfoot = document.querySelector('table tfoot td');
+          if (!tfoot) return null;
+          
+          const links = tfoot.querySelectorAll('a');
+          if (links.length === 0) return 1; // 페이지네이션 없음 = 단일 페이지
+          
+          // ">>" 링크 찾기 (마지막 페이지로 이동)
+          const lastPageLink = Array.from(links).find(link => link.textContent?.trim() === '>>');
+          if (lastPageLink) {
+            const href = lastPageLink.getAttribute('href');
+            if (href) {
+              const match = href.match(/[?&]page=(\d+)/);
+              if (match) {
+                return parseInt(match[1], 10);
+              }
+            }
+          }
+          
+          // ">>" 링크가 없으면 숫자 링크 중 최대값 찾기
+          let maxPage = 1;
+          links.forEach(link => {
+            const pageNum = parseInt(link.textContent?.trim() || '0', 10);
+            if (!isNaN(pageNum) && pageNum > maxPage) {
+              maxPage = pageNum;
+            }
+          });
+          
+          return maxPage > 0 ? maxPage : 1;
+        });
+        
+        console.log(`Total pages detected: ${totalPages === 1 ? 'single page' : totalPages + ' pages'}`);
+        
+        // 첫 페이지 정보로 다시 진행 상황 전송
+        if (onProgress) {
+          onProgress(currentPage, totalPages);
+        }
+      }
 
       const commits = await page.evaluate(() => {
         const commitElements = document.querySelectorAll('.commit');
@@ -278,11 +362,12 @@ async function getCommits(
           const commitId = commitIdMatch ? commitIdMatch[1] : '';
 
           if (commitId) {
+            const rawDate = dateElement?.textContent?.trim() || '';
             commitsData.push({
               commitId,
               message: linkElement?.textContent?.trim() || '',
               author: authorElement?.textContent?.trim() || '',
-              date: dateElement?.textContent?.trim() || '',
+              date: rawDate,
               files: []
             });
           }
@@ -314,7 +399,14 @@ async function getCommits(
     }
 
     console.log(`Total NEW commits fetched: ${allCommits.length}${cacheHit ? ' (stopped at cached commit)' : ''}`);
-    return allCommits;
+    
+    // 날짜를 ISO 형식으로 변환
+    const commitsWithConvertedDates = allCommits.map(commit => ({
+      ...commit,
+      date: convertKoreanDateToISO(commit.date)
+    }));
+    
+    return commitsWithConvertedDates;
   } catch (error) {
     console.error('Get commits error:', error);
     throw error;
@@ -383,7 +475,11 @@ async function getCommitDetail(subProjectUuid: string, commitId: string): Promis
       };
     });
 
-    return commitDetail;
+    // 날짜를 ISO 형식으로 변환
+    return {
+      ...commitDetail,
+      date: convertKoreanDateToISO(commitDetail.date)
+    };
   } catch (error) {
     console.error('Get commit detail error:', error);
     throw error;

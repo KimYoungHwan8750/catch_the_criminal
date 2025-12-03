@@ -15,7 +15,8 @@ import {
   saveCommitWithDetails,
   getCommitDetail,
   insertCommit,
-  hasCommitInBranch
+  hasCommitInBranch,
+  resetDatabase
 } from "./db";
 import { 
   getPage, 
@@ -195,8 +196,13 @@ function initIpc() {
         return hasCommitInBranch(uuid, commitId, branch);
       };
 
-      // 커밋 크롤링 (캐싱 지원)
-      const commits = await getCommits(uuid, branch, checkExisting);
+      // 진행 상황 콜백
+      const onProgress = (current: number, total: number | null) => {
+        event.reply('crawl-progress', { current, total, branch });
+      };
+
+      // 커밋 크롤링 (캐싱 지원, 진행 상황 전송)
+      const commits = await getCommits(uuid, branch, checkExisting, onProgress);
       console.log(`Crawled ${commits.length} NEW commits for branch ${branch}`);
       
       // 커밋 기본 정보만 저장 (빠름)
@@ -287,6 +293,18 @@ function initIpc() {
     } catch (error) {
       console.error('Error crawling commit detail:', error);
       event.reply('crawl-commit-detail', null);
+    }
+  });
+
+  // DB 리셋 (테스트용)
+  ipcMain.on('reset-database', async (event) => {
+    try {
+      console.log('[IPC] Database reset requested');
+      const result = resetDatabase();
+      event.reply('reset-database', result);
+    } catch (error) {
+      console.error('[IPC] Error resetting database:', error);
+      event.reply('reset-database', { success: false, message: error.message });
     }
   });
 }

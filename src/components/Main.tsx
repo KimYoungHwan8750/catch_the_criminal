@@ -34,6 +34,7 @@ function Main() {
   const [selectedAuthor, setSelectedAuthor] = useState('');
   const [fileNameFilter, setFileNameFilter] = useState('');
   const [isCrawling, setIsCrawling] = useState(false);
+  const [crawlProgress, setCrawlProgress] = useState<{ current: number; total: number | null } | null>(null);
 
   const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
@@ -86,24 +87,26 @@ function Main() {
       }
     });
 
+    // 크롤링 진행 상황 수신
+    const unsubProgress = window.electron.ipcRenderer.on('crawl-progress', (data: any) => {
+      console.log('[Main] Crawl progress:', data);
+      setCrawlProgress({ current: data.current, total: data.total });
+    });
+
     // 커밋 크롤링 결과 수신
     const unsubCrawl = window.electron.ipcRenderer.on('crawl-commits', (result: any) => {
       console.log('[Main] Crawl result:', result);
       setIsCrawling(false);
-      if (result.success) {
-        console.log(`Successfully crawled ${result.count} commits`);
-        loadCommits();
-        loadAuthors();
-      } else {
-        console.error('Crawl failed:', result.error);
-        loadCommits();
-        loadAuthors();
-      }
+      setCrawlProgress(null);
+
+      // 크롤링 완료 후 데이터 로드는 별도 useEffect에서 처리
+      // (최신 selectedBranch 참조 보장)
     });
 
     return () => {
       console.log('[Main] Cleaning up IPC listeners');
       if (unsubBranches) unsubBranches();
+      if (unsubProgress) unsubProgress();
       if (unsubCrawl) unsubCrawl();
     };
   }, []);
@@ -129,9 +132,20 @@ function Main() {
     });
   }, [selectedBranch, uuid]);
 
+  // 크롤링 완료 후 데이터 로드 (isCrawling이 false가 되면)
+  useEffect(() => {
+    // 크롤링이 방금 완료된 경우 (isCrawling이 false이고, uuid와 branch가 있을 때)
+    if (!isCrawling && uuid && selectedBranch) {
+      console.log('[Main] Crawling finished, loading data for branch:', selectedBranch);
+      loadCommits();
+      loadAuthors();
+    }
+  }, [isCrawling]);
+
   // 작성자 및 커밋 목록 IPC 리스너 (한 번만 등록)
   useEffect(() => {
     const unsubAuthors = window.electron.ipcRenderer.on('get-authors-from-db', (data: any) => {
+      console.log('[Main] Received authors:', data);
       if (data && data.length > 0) {
         setAuthors(data);
       } else {
@@ -140,9 +154,11 @@ function Main() {
     });
 
     const unsubCommits = window.electron.ipcRenderer.on('get-commits-from-db', (data: any) => {
+      console.log('[Main] Received commits:', data ? data.length : 0, 'commits');
       if (data && data.length > 0) {
         setCommits(data);
       } else {
+        console.log('[Main] No commits received, setting empty array');
         setCommits([]);
       }
     });
@@ -154,8 +170,12 @@ function Main() {
   }, []);
 
   const loadAuthors = () => {
-    if (!uuid || !selectedBranch) return;
+    if (!uuid || !selectedBranch) {
+      console.log('[loadAuthors] Skipping - missing uuid or branch:', { uuid, selectedBranch });
+      return;
+    }
 
+    console.log('[loadAuthors] Requesting authors for branch:', selectedBranch);
     window.electron.ipcRenderer.sendMessage('get-authors-from-db', {
       uuid,
       branch: selectedBranch
@@ -163,8 +183,12 @@ function Main() {
   };
 
   const loadCommits = () => {
-    if (!uuid || !selectedBranch) return;
+    if (!uuid || !selectedBranch) {
+      console.log('[loadCommits] Skipping - missing uuid or branch:', { uuid, selectedBranch });
+      return;
+    }
 
+    console.log('[loadCommits] Requesting commits for:', { uuid, branch: selectedBranch, fileName: fileNameFilter, author: selectedAuthor });
     window.electron.ipcRenderer.sendMessage('get-commits-from-db', {
       uuid,
       fileName: fileNameFilter || undefined,
@@ -243,7 +267,17 @@ function Main() {
         <LoadingOverlay>
           <LoadingSpinner />
           <LoadingText>커밋 정보를 불러오는 중입니다...</LoadingText>
-          <LoadingSubText>잠시만 기다려주세요</LoadingSubText>
+          {crawlProgress && (
+            <LoadingSubText>
+              {crawlProgress.total
+                ? `${crawlProgress.current} / ${crawlProgress.total} 페이지`
+                : crawlProgress.current === 1
+                  ? '페이지 정보 확인 중...'
+                  : `${crawlProgress.current} 페이지 처리 중...`
+              }
+            </LoadingSubText>
+          )}
+          {!crawlProgress && <LoadingSubText>잠시만 기다려주세요</LoadingSubText>}
         </LoadingOverlay>
       </Container>
     );

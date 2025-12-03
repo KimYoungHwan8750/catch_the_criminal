@@ -14,10 +14,12 @@ export type Channels =
   | 'get-branches'
   | 'get-commits-from-db'
   | 'crawl-commits'
+  | 'crawl-progress'
   | 'get-authors-from-db'
   | 'crawl-authors'
   | 'get-commit-detail-from-db'
-  | 'crawl-commit-detail';
+  | 'crawl-commit-detail'
+  | 'reset-database';
 
 const electronHandler = {
   ipcRenderer: {

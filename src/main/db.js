@@ -166,6 +166,36 @@ function clearAllData() {
     db.exec('DELETE FROM t_project');
 }
 
+// DB 완전 리셋 (테스트용)
+function resetDatabase() {
+    console.log('[DB Reset] Starting database reset...');
+    
+    try {
+        // 모든 테이블 데이터 삭제
+        db.exec('DELETE FROM t_commit_detail');
+        console.log('[DB Reset] Cleared t_commit_detail');
+        
+        db.exec('DELETE FROM t_commit');
+        console.log('[DB Reset] Cleared t_commit');
+        
+        db.exec('DELETE FROM t_sub_project');
+        console.log('[DB Reset] Cleared t_sub_project');
+        
+        db.exec('DELETE FROM t_project');
+        console.log('[DB Reset] Cleared t_project');
+        
+        // 사용자 인증 정보는 선택적으로 삭제 (주석 해제하면 삭제됨)
+        // db.exec('DELETE FROM t_user_credentials');
+        // console.log('[DB Reset] Cleared t_user_credentials');
+        
+        console.log('[DB Reset] Database reset completed successfully!');
+        return { success: true, message: 'Database reset completed successfully!' };
+    } catch (error) {
+        console.error('[DB Reset] Error:', error);
+        return { success: false, message: error.message };
+    }
+}
+
 function saveProjectsData(projects) {
     // 트랜잭션으로 처리
     const insertProjectStmt = db.prepare('INSERT OR IGNORE INTO t_project (project_name) VALUES (?)');
@@ -262,7 +292,7 @@ function getSubProjectByUuid(uuid) {
 }
 
 // 서브프로젝트의 커밋 목록 조회 (최신순, 브랜치 필터링)
-function getCommitsBySubProjectUuid(uuid, branch = null, limit = 100) {
+function getCommitsBySubProjectUuid(uuid, branch = null, limit = 1000) {
   const subProject = getSubProjectByUuid(uuid);
   if (!subProject) return [];
 
@@ -403,6 +433,7 @@ export {
   getUserCredentials,
   deleteUserCredentials,
   clearAllData,
+  resetDatabase,
   saveProjectsData,
   getLastUpdateTime,
   getSubProjectByUuid,

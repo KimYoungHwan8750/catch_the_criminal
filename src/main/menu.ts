@@ -31,7 +31,7 @@ export default class MenuBuilder {
         ? this.buildDarwinTemplate()
         : this.buildDefaultTemplate();
 
-    const menu = Menu.buildFromTemplate(template);
+    const menu = Menu.buildFromTemplate(template as MenuItemConstructorOptions[]);
     Menu.setApplicationMenu(menu);
 
     return menu;
@@ -43,9 +43,8 @@ export default class MenuBuilder {
 
       Menu.buildFromTemplate([
         {
-          label: 'Inspect element',
+          label: 'KimYoungHwan',
           click: () => {
-            this.mainWindow.webContents.inspectElement(x, y);
           },
         },
       ]).popup({ window: this.mainWindow });
@@ -122,6 +121,14 @@ export default class MenuBuilder {
           accelerator: 'Alt+Command+I',
           click: () => {
             this.mainWindow.webContents.toggleDevTools();
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Reset Database (Test)',
+          accelerator: 'Ctrl+Shift+R',
+          click: () => {
+            this.mainWindow.webContents.executeJavaScript('resetDB()');
           },
         },
       ],
@@ -237,6 +244,14 @@ export default class MenuBuilder {
                   accelerator: 'Alt+Ctrl+I',
                   click: () => {
                     this.mainWindow.webContents.toggleDevTools();
+                  },
+                },
+                { type: 'separator' },
+                {
+                  label: 'Reset Database (Test)',
+                  accelerator: 'Ctrl+Shift+R',
+                  click: () => {
+                    this.mainWindow.webContents.executeJavaScript('resetDB()');
                   },
                 },
               ]
