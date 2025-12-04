@@ -35,7 +35,11 @@ const electronHandler = {
         ipcRenderer.removeListener(channel, subscription);
       };
     },
-
+    once(channel: Channels, func: (...args: unknown[]) => void) {
+      const subscription = (_event: IpcRendererEvent, ...args: unknown[]) =>
+        func(...args);
+      ipcRenderer.once(channel, subscription);
+    },
   },
 };
 

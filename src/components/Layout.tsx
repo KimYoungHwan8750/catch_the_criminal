@@ -21,17 +21,19 @@ const Container = styled.div`
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: calc(100vh - 70px);
+  height: 100vh;
 `;
 
 const FlexContainer = styled.div`
   display: flex;
+  flex: 1;
   width: 100%;
-  height: 100%;
-`
+  min-height: 0;
+`;
 
 const MainContent = styled.main`
-  width: 100%;
+  flex: 1;
+  height: 100%;
   overflow-y: auto;
 `;
 

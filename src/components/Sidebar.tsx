@@ -145,7 +145,7 @@ function Sidebar() {
 const Container = styled.div`
     display: flex;
     flex-direction: column;
-    width: 700px;
+    width: 430px;
     height: 100%;
     box-sizing: border-box;
     background-color: #f0f0f0;
@@ -154,6 +154,7 @@ const Container = styled.div`
     position: sticky;
     left: 0;
     top: 0;
+    flex-shrink: 0;
 `
 
 const Header = styled.div`

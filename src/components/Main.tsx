@@ -1,5 +1,5 @@
 import styled from "styled-components";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useLocation } from "react-router-dom";
 
 interface Commit {
@@ -34,12 +34,18 @@ function Main() {
   const [selectedAuthor, setSelectedAuthor] = useState('');
   const [fileNameFilter, setFileNameFilter] = useState('');
   const [isCrawling, setIsCrawling] = useState(false);
-  const [crawlProgress, setCrawlProgress] = useState<{ current: number; total: number | null } | null>(null);
+  const [crawlProgress, setCrawlProgress] = useState<{ current: number; total: number | null; phase?: string; message?: string } | null>(null);
 
   const [selectedCommit, setSelectedCommit] = useState<Commit | null>(null);
   const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState<CommitFile | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+
+  // 이전 크롤링 상태를 추적하기 위한 ref
+  const prevIsCrawlingRef = useRef(false);
+  // 마지막으로 크롤링한 브랜치 추적
+  const lastCrawledRef = useRef<{ uuid: string; branch: string } | null>(null);
 
   useEffect(() => {
     if (uuid) {
@@ -51,19 +57,24 @@ function Main() {
       setFileNameFilter('');
       setBranches([]);
       setSelectedBranch('');
+      setIsCrawling(false);
+      prevIsCrawlingRef.current = false;
+      lastCrawledRef.current = null; // 크롤링 이력 초기화
       // 브랜치 로드 요청
       window.electron.ipcRenderer.sendMessage('get-branches', uuid);
     }
   }, [uuid]);
 
   useEffect(() => {
-    if (uuid && selectedBranch && (selectedAuthor || fileNameFilter)) {
+    if (uuid && selectedBranch) {
       loadCommits();
     }
   }, [selectedAuthor, fileNameFilter, selectedBranch, uuid]);
 
   const handleBranchChange = (branchName: string) => {
     if (branchName !== selectedBranch) {
+      // 브랜치 변경 시 크롤링 이력 초기화하여 새로 크롤링하도록
+      lastCrawledRef.current = null;
       setSelectedBranch(branchName);
     }
   };
@@ -90,7 +101,12 @@ function Main() {
     // 크롤링 진행 상황 수신
     const unsubProgress = window.electron.ipcRenderer.on('crawl-progress', (data: any) => {
       console.log('[Main] Crawl progress:', data);
-      setCrawlProgress({ current: data.current, total: data.total });
+      setCrawlProgress({
+        current: data.current,
+        total: data.total,
+        phase: data.phase,
+        message: data.message
+      });
     });
 
     // 커밋 크롤링 결과 수신
@@ -99,8 +115,22 @@ function Main() {
       setIsCrawling(false);
       setCrawlProgress(null);
 
-      // 크롤링 완료 후 데이터 로드는 별도 useEffect에서 처리
-      // (최신 selectedBranch 참조 보장)
+      // 크롤링 완료 직후 데이터 로드
+      if (result && result.uuid && result.branch) {
+        console.log('[Main] Crawl completed, loading data for:', result);
+
+        // 작성자 로드
+        window.electron.ipcRenderer.sendMessage('get-authors-from-db', {
+          uuid: result.uuid,
+          branch: result.branch
+        });
+
+        // 커밋 로드
+        window.electron.ipcRenderer.sendMessage('get-commits-from-db', {
+          uuid: result.uuid,
+          branch: result.branch
+        });
+      }
     });
 
     return () => {
@@ -118,6 +148,12 @@ function Main() {
       return;
     }
 
+    // 이미 같은 uuid와 branch로 크롤링 중이거나 완료했으면 스킵
+    if (lastCrawledRef.current?.uuid === uuid && lastCrawledRef.current?.branch === selectedBranch) {
+      console.log('[Main] Already crawled this combination, skipping');
+      return;
+    }
+
     if (isCrawling) {
       console.log('[Main] Already crawling, skipping');
       return;
@@ -125,6 +161,7 @@ function Main() {
 
     console.log(`[Main] Starting crawl for branch: ${selectedBranch}`);
     setIsCrawling(true);
+    lastCrawledRef.current = { uuid, branch: selectedBranch };
 
     window.electron.ipcRenderer.sendMessage('crawl-commits', {
       uuid,
@@ -132,14 +169,9 @@ function Main() {
     });
   }, [selectedBranch, uuid]);
 
-  // 크롤링 완료 후 데이터 로드 (isCrawling이 false가 되면)
+  // isCrawling 상태 추적 (prevIsCrawlingRef 업데이트용)
   useEffect(() => {
-    // 크롤링이 방금 완료된 경우 (isCrawling이 false이고, uuid와 branch가 있을 때)
-    if (!isCrawling && uuid && selectedBranch) {
-      console.log('[Main] Crawling finished, loading data for branch:', selectedBranch);
-      loadCommits();
-      loadAuthors();
-    }
+    prevIsCrawlingRef.current = isCrawling;
   }, [isCrawling]);
 
   // 작성자 및 커밋 목록 IPC 리스너 (한 번만 등록)
@@ -200,14 +232,18 @@ function Main() {
 
   const handleCommitClick = (commit: Commit) => {
     setSelectedCommit(commit);
+    setIsLoadingDetail(true);
 
     // 먼저 DB에서 조회
     window.electron.ipcRenderer.sendMessage('get-commit-detail-from-db', commit.commit_id);
-    window.electron.ipcRenderer.on('get-commit-detail-from-db', (data: any) => {
+
+    // 기존 리스너 제거 후 새로 등록
+    const handleDetailFromDB = (data: any) => {
       if (data && data.length > 0) {
         // DB에 있으면 바로 표시
         setCommitFiles(data);
         setShowModal(true);
+        setIsLoadingDetail(false);
       } else {
         // DB에 없으면 크롤링
         console.log('Commit detail not in DB, crawling...');
@@ -217,7 +253,7 @@ function Main() {
           branch: selectedBranch
         });
 
-        window.electron.ipcRenderer.on('crawl-commit-detail', (detail: any) => {
+        const handleCrawlDetail = (detail: any) => {
           if (detail && detail.files) {
             // 크롤링한 데이터를 DB에 저장
             const files = detail.files.map((file: any) => ({
@@ -227,13 +263,19 @@ function Main() {
             }));
             setCommitFiles(files);
             setShowModal(true);
-
-            // DB에 저장 (다음에는 빠르게 로드하기 위해)
-            // saveCommitWithDetails 호출 필요
+            setIsLoadingDetail(false);
+          } else {
+            setIsLoadingDetail(false);
           }
-        });
+        };
+
+        // 일회성 리스너 등록
+        window.electron.ipcRenderer.once('crawl-commit-detail', handleCrawlDetail);
       }
-    });
+    };
+
+    // 일회성 리스너 등록
+    window.electron.ipcRenderer.once('get-commit-detail-from-db', handleDetailFromDB);
   };
 
   const handleFileClick = (file: CommitFile) => {
@@ -269,12 +311,13 @@ function Main() {
           <LoadingText>커밋 정보를 불러오는 중입니다...</LoadingText>
           {crawlProgress && (
             <LoadingSubText>
-              {crawlProgress.total
-                ? `${crawlProgress.current} / ${crawlProgress.total} 페이지`
-                : crawlProgress.current === 1
-                  ? '페이지 정보 확인 중...'
-                  : `${crawlProgress.current} 페이지 처리 중...`
-              }
+              {crawlProgress.message || (
+                crawlProgress.total
+                  ? `${crawlProgress.current-1} / ${crawlProgress.total} 페이지`
+                  : crawlProgress.current === 1
+                    ? '페이지 정보 확인 중...'
+                    : `${crawlProgress.current} 페이지 처리 중...`
+              )}
             </LoadingSubText>
           )}
           {!crawlProgress && <LoadingSubText>잠시만 기다려주세요</LoadingSubText>}
@@ -348,15 +391,20 @@ function Main() {
       </CommitList>
 
       {showModal && selectedCommit && (
-        <Modal onClick={() => { setShowModal(false); setSelectedFile(null); }}>
+        <Modal onClick={() => { setShowModal(false); setSelectedFile(null); setIsLoadingDetail(false); }}>
           <ModalContent onClick={(e) => e.stopPropagation()}>
             <ModalHeader>
               <ModalTitle>{selectedCommit.commit_msg}</ModalTitle>
-              <CloseButton onClick={() => { setShowModal(false); setSelectedFile(null); }}>✕</CloseButton>
+              <CloseButton onClick={() => { setShowModal(false); setSelectedFile(null); setIsLoadingDetail(false); }}>✕</CloseButton>
             </ModalHeader>
 
             <ModalBody>
-              {!selectedFile ? (
+              {isLoadingDetail ? (
+                <LoadingMessage>
+                  <ModalLoadingSpinner />
+                  <div>커밋 상세 정보를 불러오는 중...</div>
+                </LoadingMessage>
+              ) : !selectedFile ? (
                 <>
                   <CommitInfo>
                     <InfoRow>
@@ -371,11 +419,19 @@ function Main() {
 
                   <FileListTitle>변경된 파일 ({commitFiles.length})</FileListTitle>
                   <FileList>
-                    {commitFiles.map((file, idx) => (
-                      <FileItem key={idx} onClick={() => handleFileClick(file)}>
-                        📄 {file.commit_file}
-                      </FileItem>
-                    ))}
+                    {commitFiles.map((file, idx) => {
+                      const isHighlighted = !!(fileNameFilter &&
+                        file.commit_file.toLowerCase().includes(fileNameFilter.toLowerCase()));
+                      return (
+                        <FileItem
+                          key={idx}
+                          onClick={() => handleFileClick(file)}
+                          $highlighted={isHighlighted}
+                        >
+                          📄 {file.commit_file}
+                        </FileItem>
+                      );
+                    })}
                   </FileList>
                 </>
               ) : (
@@ -400,6 +456,7 @@ const Container = styled.div`
   flex-direction: column;
   width: 100%;
   height: 100%;
+  min-height: 0;
   background: #f5f7fa;
 `;
 
@@ -528,6 +585,7 @@ const LoadingSubText = styled.div`
 
 const CommitList = styled.div`
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px;
   display: flex;
@@ -684,18 +742,19 @@ const FileList = styled.div`
   gap: 8px;
 `;
 
-const FileItem = styled.div`
+const FileItem = styled.div<{ $highlighted?: boolean }>`
   padding: 12px;
-  background: #f8f9fa;
+  background: ${props => props.$highlighted ? '#fff9c4' : '#f8f9fa'};
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  border: 1px solid transparent;
+  border: 1px solid ${props => props.$highlighted ? '#ffd54f' : 'transparent'};
+  font-weight: ${props => props.$highlighted ? '600' : 'normal'};
 
   &:hover {
-    background: #667eea;
-    color: white;
-    border-color: #667eea;
+    background: ${props => props.$highlighted ? '#ffeb3b' : '#667eea'};
+    color: ${props => props.$highlighted ? '#000' : 'white'};
+    border-color: ${props => props.$highlighted ? '#ffc107' : '#667eea'};
     transform: translateX(4px);
   }
 `;
@@ -746,6 +805,31 @@ const DiffLine = styled.div<{ bgColor: string }>`
   background-color: ${props => props.bgColor};
   padding: 2px 8px;
   white-space: pre;
+`;
+
+const LoadingMessage = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #666;
+  font-size: 16px;
+  gap: 20px;
+`;
+
+const ModalLoadingSpinner = styled.div`
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
 `;
 
 export default Main;

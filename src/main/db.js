@@ -322,7 +322,7 @@ function getCommitsByFile(uuid, fileName, branch = null) {
   let query = `
     SELECT DISTINCT c.* FROM t_commit c
     JOIN t_commit_detail cd ON c.commit_id = cd.commit_id
-    WHERE c.sub_project_id = ? AND cd.commit_file LIKE ?
+    WHERE c.sub_project_id = ? AND LOWER(cd.commit_file) LIKE LOWER(?)
   `;
   const params = [subProject.sub_project_id, `%${fileName}%`];
 

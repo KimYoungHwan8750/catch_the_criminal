@@ -196,16 +196,22 @@ function initIpc() {
         return hasCommitInBranch(uuid, commitId, branch);
       };
 
-      // 진행 상황 콜백
+      // 진행 상황 콜백 - 커밋 목록 크롤링
       const onProgress = (current: number, total: number | null) => {
-        event.reply('crawl-progress', { current, total, branch });
+        event.reply('crawl-progress', { 
+          current, 
+          total, 
+          branch,
+          phase: 'commits',
+          message: `커밋 목록 크롤링 중... (${current}${total ? `/${total}` : ''} 페이지)`
+        });
       };
 
       // 커밋 크롤링 (캐싱 지원, 진행 상황 전송)
       const commits = await getCommits(uuid, branch, checkExisting, onProgress);
       console.log(`Crawled ${commits.length} NEW commits for branch ${branch}`);
       
-      // 커밋 기본 정보만 저장 (빠름)
+      // 커밋 기본 정보 저장
       let savedCount = 0;
       for (const commit of commits) {
         try {
@@ -224,7 +230,68 @@ function initIpc() {
       }
       
       console.log(`Successfully saved ${savedCount} commits to branch ${branch}`);
-      event.reply('crawl-commits', { success: true, count: savedCount, branch });
+      
+      // 각 커밋의 상세 정보(파일 목록) 크롤링
+      console.log(`Starting to crawl commit details for ${commits.length} commits...`);
+      let detailsSavedCount = 0;
+      
+      for (let i = 0; i < commits.length; i++) {
+        const commit = commits[i];
+        
+        // 진행 상황 전송
+        event.reply('crawl-progress', {
+          current: i + 1,
+          total: commits.length,
+          branch,
+          phase: 'details',
+          message: `커밋 상세 정보 크롤링 중... (${i + 1}/${commits.length})`
+        });
+        
+        try {
+          // DB에 이미 있는지 체크
+          const existingDetails = getCommitDetail(commit.commitId);
+          if (existingDetails && existingDetails.length > 0) {
+            console.log(`Commit detail already exists for ${commit.commitId}, skipping`);
+            detailsSavedCount++;
+            continue;
+          }
+          
+          // 상세 정보 크롤링
+          const detail = await crawlCommitDetail(uuid, commit.commitId);
+          
+          // DB에 저장
+          if (detail && detail.files) {
+            for (const file of detail.files) {
+              saveCommitWithDetails(
+                commit.commitId,
+                subProject.sub_project_id,
+                commit.author,
+                commit.message,
+                commit.date,
+                branch,
+                file.path,
+                file.diff
+              );
+            }
+            detailsSavedCount++;
+          }
+        } catch (error) {
+          console.error(`Error crawling commit detail for ${commit.commitId}:`, error);
+          // 에러가 나도 계속 진행
+        }
+        
+        // 너무 빠르게 요청하지 않도록 약간의 딜레이
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      console.log(`Successfully crawled details for ${detailsSavedCount}/${commits.length} commits`);
+      event.reply('crawl-commits', { 
+        success: true, 
+        count: savedCount, 
+        detailsCount: detailsSavedCount,
+        branch, 
+        uuid 
+      });
     } catch (error) {
       console.error('Error crawling commits:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
