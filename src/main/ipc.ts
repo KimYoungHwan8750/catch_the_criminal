@@ -1,11 +1,11 @@
 import { ipcMain } from "electron";
-import { 
-  getProjectList, 
-  getSubProjectList, 
-  saveUserCredentials, 
-  getUserCredentials, 
-  deleteUserCredentials, 
-  saveProjectsData, 
+import {
+  getProjectList,
+  getSubProjectList,
+  saveUserCredentials,
+  getUserCredentials,
+  deleteUserCredentials,
+  saveProjectsData,
   getLastUpdateTime,
   getSubProjectByUuid,
   getCommitsBySubProjectUuid,
@@ -18,11 +18,11 @@ import {
   hasCommitInBranch,
   resetDatabase
 } from "./db";
-import { 
-  getPage, 
-  isSignedIn, 
-  login, 
-  logout, 
+import {
+  getPage,
+  isSignedIn,
+  login,
+  logout,
   crawlRepositories,
   getBranches,
   getCommits,
@@ -107,13 +107,13 @@ function initIpc() {
     try {
       const logoutSuccess = await logout();
       console.log('Logout result:', logoutSuccess);
-      
+
       // 로그아웃 성공 시 저장된 자격증명 삭제
       if (logoutSuccess) {
         deleteUserCredentials();
         console.log('User credentials deleted');
       }
-      
+
       event.reply('logout', logoutSuccess);
     } catch (error) {
       console.error('Error during logout:', error);
@@ -163,16 +163,16 @@ function initIpc() {
   ipcMain.on('get-commits-from-db', async (event, arg: { uuid: string, fileName?: string, author?: string, branch?: string }) => {
     try {
       const { uuid, fileName, author, branch } = arg;
-      
+
       let commits;
       if (fileName) {
-        commits = getCommitsByFile(uuid, fileName, branch);
+        commits = getCommitsByFile(uuid, fileName, (branch || undefined) as any);
       } else if (author) {
-        commits = getCommitsByAuthor(uuid, author, branch);
+        commits = getCommitsByAuthor(uuid, author, (branch || undefined) as any);
       } else {
-        commits = getCommitsBySubProjectUuid(uuid, branch);
+        commits = getCommitsBySubProjectUuid(uuid, (branch || undefined) as any);
       }
-      
+
       event.reply('get-commits-from-db', commits);
     } catch (error) {
       console.error('Error getting commits from DB:', error);
@@ -185,22 +185,22 @@ function initIpc() {
     try {
       const { uuid, branch = 'master' } = arg;
       console.log(`Crawling commits for ${uuid}, branch: ${branch}`);
-      
+
       const subProject = getSubProjectByUuid(uuid);
       if (!subProject) {
         throw new Error('SubProject not found');
       }
 
       // 캐싱 체크 함수: 이 브랜치에 이미 있는 커밋인지 확인
-      const checkExisting = (commitId: string) => {
-        return hasCommitInBranch(uuid, commitId, branch);
+      const checkExisting = (commitId: string): boolean => {
+        return hasCommitInBranch(uuid, commitId, branch) as boolean;
       };
 
       // 진행 상황 콜백 - 커밋 목록 크롤링
       const onProgress = (current: number, total: number | null) => {
-        event.reply('crawl-progress', { 
-          current, 
-          total, 
+        event.reply('crawl-progress', {
+          current,
+          total,
           branch,
           phase: 'commits',
           message: `커밋 목록 크롤링 중... (${current}${total ? `/${total}` : ''} 페이지)`
@@ -210,17 +210,17 @@ function initIpc() {
       // 커밋 크롤링 (캐싱 지원, 진행 상황 전송)
       const commits = await getCommits(uuid, branch, checkExisting, onProgress);
       console.log(`Crawled ${commits.length} NEW commits for branch ${branch}`);
-      
+
       // 커밋 기본 정보 저장
       let savedCount = 0;
       for (const commit of commits) {
         try {
           insertCommit(
             commit.commitId,
-            subProject.sub_project_id,
+            (subProject as any).sub_project_id,
             commit.author,
             commit.message,
-            commit.date,
+            (commit.date || undefined) as any,
             branch
           );
           savedCount++;
@@ -228,69 +228,68 @@ function initIpc() {
           console.error(`Error saving commit ${commit.commitId}:`, error);
         }
       }
-      
+
       console.log(`Successfully saved ${savedCount} commits to branch ${branch}`);
-      
+
+      // DB에서 이 브랜치의 모든 커밋 가져오기 (상세 정보 크롤링 대상)
+      const allCommitsInBranch = getCommitsBySubProjectUuid(uuid, (branch || undefined) as any, 10000) as any[];
+      console.log(`Total commits in branch ${branch}: ${allCommitsInBranch.length}`);
+
       // 각 커밋의 상세 정보(파일 목록) 크롤링
-      console.log(`Starting to crawl commit details for ${commits.length} commits...`);
+      console.log(`Starting to crawl commit details for ${allCommitsInBranch.length} commits...`);
       let detailsSavedCount = 0;
-      
-      for (let i = 0; i < commits.length; i++) {
-        const commit = commits[i];
-        
+
+      for (let i = 0; i < allCommitsInBranch.length; i++) {
+        const commit = allCommitsInBranch[i] as any;
+
         // 진행 상황 전송
         event.reply('crawl-progress', {
           current: i + 1,
-          total: commits.length,
+          total: allCommitsInBranch.length,
           branch,
           phase: 'details',
-          message: `커밋 상세 정보 크롤링 중... (${i + 1}/${commits.length})`
+          message: `커밋 상세 정보 크롤링 중... (${i + 1}/${allCommitsInBranch.length})`
         });
-        
+
         try {
           // DB에 이미 있는지 체크
-          const existingDetails = getCommitDetail(commit.commitId);
+          const existingDetails = getCommitDetail(commit.commit_id);
           if (existingDetails && existingDetails.length > 0) {
-            console.log(`Commit detail already exists for ${commit.commitId}, skipping`);
+            console.log(`Commit detail already exists for ${commit.commit_id}, skipping`);
             detailsSavedCount++;
             continue;
           }
-          
+
           // 상세 정보 크롤링
-          const detail = await crawlCommitDetail(uuid, commit.commitId);
-          
+          const detail = await crawlCommitDetail(uuid, commit.commit_id);
+
           // DB에 저장
-          if (detail && detail.files) {
-            for (const file of detail.files) {
-              saveCommitWithDetails(
-                commit.commitId,
-                subProject.sub_project_id,
-                commit.author,
-                commit.message,
-                commit.date,
-                branch,
-                file.path,
-                file.diff
-              );
-            }
+          if (detail && detail.files && detail.files.length > 0) {
+            saveCommitWithDetails(
+              commit.commit_id,
+              uuid,
+              commit.committer,
+              commit.commit_msg,
+              commit.commit_date,
+              detail.files,
+              branch
+            );
             detailsSavedCount++;
+            console.log(`✓ Saved details for commit ${commit.commit_id} (${detail.files.length} files)`);
           }
         } catch (error) {
-          console.error(`Error crawling commit detail for ${commit.commitId}:`, error);
+          console.error(`Error crawling commit detail for ${commit.commit_id}:`, error as any);
           // 에러가 나도 계속 진행
         }
-        
-        // 너무 빠르게 요청하지 않도록 약간의 딜레이
-        await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
-      console.log(`Successfully crawled details for ${detailsSavedCount}/${commits.length} commits`);
-      event.reply('crawl-commits', { 
-        success: true, 
-        count: savedCount, 
+
+      console.log(`Successfully crawled details for ${detailsSavedCount}/${allCommitsInBranch.length} commits`);
+      event.reply('crawl-commits', {
+        success: true,
+        count: savedCount,
         detailsCount: detailsSavedCount,
-        branch, 
-        uuid 
+        branch,
+        uuid
       });
     } catch (error) {
       console.error('Error crawling commits:', error);
@@ -303,7 +302,7 @@ function initIpc() {
   ipcMain.on('get-authors-from-db', async (event, arg: { uuid: string, branch?: string }) => {
     try {
       const { uuid, branch } = arg;
-      const authors = getAuthorsBySubProjectUuid(uuid, branch);
+      const authors = getAuthorsBySubProjectUuid(uuid, (branch || undefined) as any);
       event.reply('get-authors-from-db', authors);
     } catch (error) {
       console.error('Error getting authors from DB:', error);
@@ -338,7 +337,7 @@ function initIpc() {
     try {
       const { uuid, commitId, branch = 'master' } = arg;
       const detail = await crawlCommitDetail(uuid, commitId);
-      
+
       // DB에 저장
       if (detail && detail.files) {
         const subProject = getSubProjectByUuid(uuid);
@@ -355,7 +354,7 @@ function initIpc() {
           console.log(`Saved commit detail for ${commitId} (branch: ${branch})`);
         }
       }
-      
+
       event.reply('crawl-commit-detail', detail);
     } catch (error) {
       console.error('Error crawling commit detail:', error);
@@ -371,7 +370,7 @@ function initIpc() {
       event.reply('reset-database', result);
     } catch (error) {
       console.error('[IPC] Error resetting database:', error);
-      event.reply('reset-database', { success: false, message: error.message });
+      event.reply('reset-database', { success: false, message: (error as any).message });
     }
   });
 }
