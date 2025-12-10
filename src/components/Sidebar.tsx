@@ -1,6 +1,6 @@
 import styled from "styled-components"
 import Item from "./Item";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 
 type Projects = {
@@ -22,11 +22,26 @@ function Sidebar() {
     const [isCrawling, setIsCrawling] = useState(false);
     const [lastUpdateTime, setLastUpdateTime] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
+    const [isInitialLoad, setIsInitialLoad] = useState(true);
+    const hasAutoRefreshed = useRef(false);
 
     useEffect(() => {
         loadProjects();
         loadLastUpdateTime();
     }, []);
+
+    // DB가 비어있으면 첫 1회 자동 갱신
+    useEffect(() => {
+        if (isInitialLoad && !hasAutoRefreshed.current && !isCrawling) {
+            // projectList가 비어있고 lastUpdateTime이 없으면 자동 갱신
+            if (projectList.length === 0 && !lastUpdateTime) {
+                console.log('[Sidebar] DB is empty, auto-refreshing...');
+                hasAutoRefreshed.current = true;
+                handleCrawl();
+            }
+            setIsInitialLoad(false);
+        }
+    }, [projectList, lastUpdateTime, isInitialLoad, isCrawling]);
 
     const loadProjects = () => {
         const unsubscribe = window.electron.ipcRenderer.on('get-project-list', (data: any) => {

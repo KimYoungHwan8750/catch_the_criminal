@@ -42,6 +42,11 @@ function Main() {
   const [selectedFile, setSelectedFile] = useState<CommitFile | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
+  // 이스터에그 상태
+  const [easterEggStep, setEasterEggStep] = useState(0);
+  const [showEasterEggModal, setShowEasterEggModal] = useState(false);
+  const [pendingAuthor, setPendingAuthor] = useState('');
+
   // 이전 크롤링 상태를 추적하기 위한 ref
   const prevIsCrawlingRef = useRef(false);
   // 마지막으로 크롤링한 브랜치 추적
@@ -282,6 +287,40 @@ function Main() {
     setSelectedFile(file);
   };
 
+  const handleAuthorChange = (author: string) => {
+    const easterEggNames = ['KYH', '김영환', 'KimYounghwan8750', 'KimYoungHwan8750'];
+
+    if (easterEggNames.includes(author)) {
+      setPendingAuthor(author);
+      setEasterEggStep(1);
+      setShowEasterEggModal(true);
+    } else {
+      setSelectedAuthor(author);
+    }
+  };
+
+  const handleEasterEggConfirm = () => {
+    if (easterEggStep === 1) {
+      setEasterEggStep(2);
+    } else if (easterEggStep === 2) {
+      setEasterEggStep(3);
+    } else if (easterEggStep === 3) {
+      setEasterEggStep(4);
+    } else if (easterEggStep === 4) {
+      setShowEasterEggModal(false);
+      setEasterEggStep(0);
+      setSelectedAuthor(pendingAuthor);
+      setPendingAuthor('');
+    }
+  };
+
+  const handleEasterEggCancel = () => {
+    setShowEasterEggModal(false);
+    setEasterEggStep(0);
+    setPendingAuthor('');
+    setSelectedAuthor('');
+  };
+
   const renderDiff = (diff: string) => {
     if (!diff) return null;
 
@@ -301,6 +340,18 @@ function Main() {
       );
     });
   };
+
+  // 프로젝트 선택하지 않았을 때
+  if (!uuid) {
+    return (
+      <Container>
+        <EmptyState>
+          <EmptyIcon>📁</EmptyIcon>
+          <EmptyTitle>프로젝트를 선택해주세요</EmptyTitle>
+        </EmptyState>
+      </Container>
+    );
+  }
 
   // 로딩 중일 때
   if (isCrawling) {
@@ -363,7 +414,7 @@ function Main() {
             <Label>작성자</Label>
             <Select
               value={selectedAuthor}
-              onChange={(e) => setSelectedAuthor(e.target.value)}
+              onChange={(e) => handleAuthorChange(e.target.value)}
             >
               <option value="">전체</option>
               {authors.map((author, idx) => (
@@ -446,6 +497,51 @@ function Main() {
             </ModalBody>
           </ModalContent>
         </Modal>
+      )}
+
+      {showEasterEggModal && (
+        <EasterEggOverlay onClick={easterEggStep === 4 ? undefined : handleEasterEggCancel}>
+          <EasterEggModal onClick={(e) => e.stopPropagation()}>
+            <EasterEggIcon>
+              {easterEggStep === 4 ? '✅' : '🤔'}
+            </EasterEggIcon>
+            <EasterEggTitle>
+              {easterEggStep === 1 && '이 프로그램을 만든 사람의 이력을 조회하는 것은 다소 서운할 수 있습니다.'}
+              {easterEggStep === 2 && '정말 꼭 검색해야만 하겠습니까?'}
+              {easterEggStep === 3 && '이 실수엔 어떠한 고의성도 없을 것이며 악의적인 감정이 없을 것이라는 사실을 이해하고 계십니까?'}
+              {easterEggStep === 4 && '알겠습니다. 탐색을 시작하겠습니다.'}
+            </EasterEggTitle>
+            <EasterEggSubtitle>
+              {easterEggStep === 1 && '정말 검색하시겠습니까?'}
+              {easterEggStep === 2 && ''}
+              {easterEggStep === 3 && ''}
+              {easterEggStep === 4 && ''}
+            </EasterEggSubtitle>
+            <EasterEggButtonGroup>
+              {easterEggStep === 1 && (
+                <>
+                  <EasterEggButton onClick={handleEasterEggConfirm}>예</EasterEggButton>
+                  <EasterEggButton $secondary onClick={handleEasterEggCancel}>아니오</EasterEggButton>
+                </>
+              )}
+              {easterEggStep === 2 && (
+                <>
+                  <EasterEggButton $small onClick={handleEasterEggConfirm}>예</EasterEggButton>
+                  <EasterEggButton $secondary onClick={handleEasterEggCancel}>아니오</EasterEggButton>
+                </>
+              )}
+              {easterEggStep === 3 && (
+                <>
+                  <EasterEggButton onClick={handleEasterEggConfirm}>예</EasterEggButton>
+                  <EasterEggButton $secondary $small onClick={handleEasterEggCancel}>아니오</EasterEggButton>
+                </>
+              )}
+              {easterEggStep === 4 && (
+                <EasterEggButton onClick={handleEasterEggConfirm}>확인</EasterEggButton>
+              )}
+            </EasterEggButtonGroup>
+          </EasterEggModal>
+        </EasterEggOverlay>
       )}
     </Container>
   );
@@ -829,6 +925,143 @@ const ModalLoadingSpinner = styled.div`
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+  }
+`;
+
+const EmptyState = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 50%, #ffffff 100%);
+`;
+
+const EmptyIcon = styled.div`
+  font-size: 80px;
+  margin-bottom: 24px;
+  opacity: 0.6;
+`;
+
+const EmptyTitle = styled.h2`
+  font-size: 28px;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 16px 0;
+`;
+
+const EmptyDescription = styled.p`
+  font-size: 16px;
+  color: #666;
+  text-align: center;
+  line-height: 1.6;
+  margin: 0;
+`;
+
+const EasterEggOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.3s ease;
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+`;
+
+const EasterEggModal = styled.div`
+  background: white;
+  border-radius: 16px;
+  padding: 40px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  animation: slideUp 0.3s ease;
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(30px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+`;
+
+const EasterEggIcon = styled.div`
+  font-size: 64px;
+`;
+
+const EasterEggTitle = styled.h2`
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+`;
+
+const EasterEggSubtitle = styled.p`
+  font-size: 16px;
+  color: #666;
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+`;
+
+const EasterEggButtonGroup = styled.div`
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+`;
+
+const EasterEggButton = styled.button<{ $secondary?: boolean; $small?: boolean }>`
+  padding: ${props => props.$small ? '2px 8px' : '12px 32px'};
+  height: ${props => props.$small ? '20px' : 'auto'};
+  font-size: ${props => props.$small ? '10px' : '15px'};
+  font-weight: 600;
+  border: none;
+  border-radius: ${props => props.$small ? '4px' : '8px'};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  ${props => props.$secondary ? `
+    background: #f0f0f0;
+    color: #666;
+
+    &:hover {
+      background: #e0e0e0;
+    }
+  ` : `
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+  `}
+
+  &:active {
+    transform: translateY(0);
   }
 `;
 
