@@ -506,15 +506,15 @@ function Main() {
               {easterEggStep === 4 ? '✅' : '🤔'}
             </EasterEggIcon>
             <EasterEggTitle>
-              {easterEggStep === 1 && '이 프로그램을 만든 사람의 이력을 조회하는 것은 다소 서운할 수 있습니다.'}
+              {easterEggStep === 1 && '제작자가 만든 프로그램으로 제작자의 이력을 조회하시겠습니까?'}
               {easterEggStep === 2 && '정말 꼭 검색해야만 하겠습니까?'}
-              {easterEggStep === 3 && '이 실수엔 어떠한 고의성도 없을 것이며 악의적인 감정이 없을 것이라는 사실을 이해하고 계십니까?'}
+              {easterEggStep === 3 && '당연한 사실에 대해 인지하고 계십니까?'}
               {easterEggStep === 4 && '알겠습니다. 탐색을 시작하겠습니다.'}
             </EasterEggTitle>
             <EasterEggSubtitle>
-              {easterEggStep === 1 && '정말 검색하시겠습니까?'}
+              {easterEggStep === 1 && '이는 매우 서운할 수 있습니다. 정말 검색하시겠습니까?'}
               {easterEggStep === 2 && ''}
-              {easterEggStep === 3 && ''}
+              {easterEggStep === 3 && '코드를 작성한 사람에겐 어떠한 고의성도 없었을 것이고, 악의적으로 그런 코드를 짠 것도 아닐 것입니다.'}
               {easterEggStep === 4 && ''}
             </EasterEggSubtitle>
             <EasterEggButtonGroup>

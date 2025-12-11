@@ -42,7 +42,7 @@
     "postinstall": "ts-node .erb/scripts/check-native-dep.js && electron-builder install-app-deps && npm run build:dll",
     "lint": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx",
     "lint:fix": "cross-env NODE_ENV=development eslint . --ext .js,.jsx,.ts,.tsx --fix",
-    "package": "ts-node ./.erb/scripts/clean.js dist && npm run build && electron-builder build --publish never && npm run build:dll",
+    "package": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false ts-node ./.erb/scripts/clean.js dist && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder build --publish never && npm run build:dll",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional --module-dir release/app",
     "prestart": "cross-env NODE_ENV=development TS_NODE_TRANSPILE_ONLY=true NODE_OPTIONS=\"-r ts-node/register --no-warnings\" webpack --config ./.erb/configs/webpack.config.main.dev.ts",
     "start": "ts-node ./.erb/scripts/check-port-in-use.js && npm run prestart && npm run start:renderer",
@@ -137,6 +137,7 @@
     "electron": "^35.0.2",
     "electron-builder": "^25.1.8",
     "electron-devtools-installer": "^4.0.0",
+    "electron-icon-maker": "^0.0.5",
     "electronmon": "^2.0.3",
     "eslint": "^8.57.1",
     "eslint-config-airbnb-base": "^15.0.0",
@@ -163,8 +164,10 @@
     "rimraf": "^6.0.1",
     "sass": "^1.86.0",
     "sass-loader": "^16.0.5",
+    "sharp": "^0.34.5",
     "style-loader": "^4.0.0",
     "terser-webpack-plugin": "^5.3.14",
+    "to-ico": "^1.1.5",
     "ts-jest": "^29.2.6",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
@@ -178,17 +181,19 @@
     "webpack-merge": "^6.0.1"
   },
   "build": {
-    "productName": "ElectronReact",
-    "appId": "org.erb.ElectronReact",
+    "productName": "CatchTheCriminal",
+    "appId": "org.erb.CatchTheCriminal",
     "asar": true,
-    "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": "**\\*.{node,dll}",
+    "disableSanityCheckAsar": true,
+    "icon": "assets/icon.ico",
     "files": [
       "dist",
       "node_modules",
       "package.json"
     ],
     "mac": {
+      "icon": "assets/icons/mac/icon.icns",
       "notarize": false,
       "target": {
         "target": "default",
@@ -218,11 +223,16 @@
       ]
     },
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis"
-      ]
+      ],
+      "sign": false,
+      "signDlls": false,
+      "verifyUpdateCodeSignature": false
     },
     "linux": {
+      "icon": "assets/icons/png/512.png",
       "target": [
         "AppImage"
       ],
