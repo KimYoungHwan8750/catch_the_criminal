@@ -41,6 +41,7 @@ function Main() {
   const [showModal, setShowModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState<CommitFile | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [lastClickedCommitId, setLastClickedCommitId] = useState<string | null>(null);
 
   // 이스터에그 상태
   const [easterEggStep, setEasterEggStep] = useState(0);
@@ -65,6 +66,7 @@ function Main() {
       setIsCrawling(false);
       prevIsCrawlingRef.current = false;
       lastCrawledRef.current = null; // 크롤링 이력 초기화
+      setLastClickedCommitId(null); // 마지막 클릭 커밋 초기화
       // 브랜치 로드 요청
       window.electron.ipcRenderer.sendMessage('get-branches', uuid);
     }
@@ -80,6 +82,7 @@ function Main() {
     if (branchName !== selectedBranch) {
       // 브랜치 변경 시 크롤링 이력 초기화하여 새로 크롤링하도록
       lastCrawledRef.current = null;
+      setLastClickedCommitId(null); // 브랜치 변경 시 마지막 클릭 커밋 초기화
       setSelectedBranch(branchName);
     }
   };
@@ -236,6 +239,7 @@ function Main() {
 
 
   const handleCommitClick = (commit: Commit) => {
+    setLastClickedCommitId(commit.commit_id);
     setSelectedCommit(commit);
     setIsLoadingDetail(true);
 
@@ -430,7 +434,11 @@ function Main() {
           <NoCommits>커밋이 없습니다.</NoCommits>
         ) : (
           commits.map((commit) => (
-            <CommitItem key={commit.commit_id} onClick={() => handleCommitClick(commit)}>
+            <CommitItem
+              key={commit.commit_id}
+              onClick={() => handleCommitClick(commit)}
+              $isLastClicked={lastClickedCommitId === commit.commit_id}
+            >
               <CommitMessage>{commit.commit_msg}</CommitMessage>
               <CommitMeta>
                 <Author>👤 {commit.committer}</Author>
@@ -506,15 +514,15 @@ function Main() {
               {easterEggStep === 4 ? '✅' : '🤔'}
             </EasterEggIcon>
             <EasterEggTitle>
-              {easterEggStep === 1 && '제작자가 만든 프로그램으로 제작자의 이력을 조회하시겠습니까?'}
-              {easterEggStep === 2 && '정말 꼭 검색해야만 하겠습니까?'}
-              {easterEggStep === 3 && '당연한 사실에 대해 인지하고 계십니까?'}
+              {easterEggStep === 1 && '제가 만든 프로그램으로 제 실수를 찾아내시겠습니까?'}
+              {easterEggStep === 2 && '정말로 검색하시겠습니까?'}
+              {easterEggStep === 3 && '이 사실에 대해 인지하고 계십니까?'}
               {easterEggStep === 4 && '알겠습니다. 탐색을 시작하겠습니다.'}
             </EasterEggTitle>
             <EasterEggSubtitle>
-              {easterEggStep === 1 && '이는 매우 서운할 수 있습니다. 정말 검색하시겠습니까?'}
+              {easterEggStep === 1 && '이는 매우 서운할 수 있습니다. 계속하시겠습니까?'}
               {easterEggStep === 2 && ''}
-              {easterEggStep === 3 && '코드를 작성한 사람에겐 어떠한 고의성도 없었을 것이고, 악의적으로 그런 코드를 짠 것도 아닐 것입니다.'}
+              {easterEggStep === 3 && '제가 작성한 코드에는 어떠한 악의도 없었으며 고의성도 없습니다.'}
               {easterEggStep === 4 && ''}
             </EasterEggSubtitle>
             <EasterEggButtonGroup>
@@ -696,16 +704,17 @@ const NoCommits = styled.div`
   font-size: 16px;
 `;
 
-const CommitItem = styled.div`
+const CommitItem = styled.div<{ $isLastClicked?: boolean }>`
   background: white;
   padding: 16px;
   border-radius: 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid ${props => props.$isLastClicked ? '#ffd700' : '#e0e0e0'};
+  border-width: ${props => props.$isLastClicked ? '2px' : '1px'};
   cursor: pointer;
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #667eea;
+    border-color: ${props => props.$isLastClicked ? '#ffd700' : '#667eea'};
     transform: translateX(4px);
     box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   }
@@ -988,7 +997,7 @@ const EasterEggModal = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
+  gap: 12px;
   animation: slideUp 0.3s ease;
 
   @keyframes slideUp {
