@@ -183,19 +183,19 @@ interface CommitFile {
 // "2025-12-03 오후 1:00:00" → "2025-12-03 13:00:00"
 function convertKoreanDateToISO(koreanDate: string): string {
   if (!koreanDate) return '';
-  
+
   const match = koreanDate.match(/(\d{4})-(\d{2})-(\d{2})\s+(오전|오후)\s+(\d{1,2}):(\d{2}):(\d{2})/);
   if (!match) return koreanDate; // 변환 실패 시 원본 반환
-  
+
   const [_, year, month, day, ampm, hour, minute, second] = match;
   let hour24 = parseInt(hour, 10);
-  
+
   if (ampm === '오후' && hour24 !== 12) {
     hour24 += 12;
   } else if (ampm === '오전' && hour24 === 12) {
     hour24 = 0;
   }
-  
+
   return `${year}-${month}-${day} ${hour24.toString().padStart(2, '0')}:${minute}:${second}`;
 }
 
@@ -204,7 +204,7 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
   if (!context) throw new Error('Browser context not initialized');
 
   let branchPage: Page | null = null;
-  
+
   try {
     // 새로운 페이지 생성 (전역 page와 충돌 방지)
     branchPage = await context.newPage();
@@ -240,7 +240,7 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
 
       const branchItems = nestedUl.querySelectorAll('li.branch');
       console.log(`[Branch Parse] Found ${branchItems.length} branch items`);
-      
+
       const branches: any[] = [];
 
       branchItems.forEach(li => {
@@ -248,7 +248,7 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
         if (link) {
           const name = link.textContent?.trim() || '';
           const isDefault = li.classList.contains('active');
-          
+
           if (name) {
             console.log(`[Branch Parse] Branch: ${name}, isDefault: ${isDefault}`);
             branches.push({ name, isDefault });
@@ -276,7 +276,7 @@ async function getBranches(subProjectUuid: string): Promise<Branch[]> {
 
 // 커밋 목록 조회 (모든 페이지, 캐싱 지원)
 async function getCommits(
-  subProjectUuid: string, 
+  subProjectUuid: string,
   branch: string = 'master',
   checkExistingCommit?: (commitId: string) => boolean,
   onProgress?: (current: number, total: number | null) => void
@@ -292,17 +292,17 @@ async function getCommits(
 
     while (hasMorePages && !cacheHit) {
       // URL 형식: /Repository/{uuid}/{branch}/Commits?page={page}
-      const url = currentPage === 1 
+      const url = currentPage === 1
         ? `http://git.wnpsoft.co.kr/Repository/${subProjectUuid}/${branch}/Commits`
         : `http://git.wnpsoft.co.kr/Repository/${subProjectUuid}/${branch}/Commits?page=${currentPage}`;
-      
+
       console.log(`Fetching page ${currentPage}: ${url}`);
-      
+
       // 진행 상황 전송
       if (onProgress) {
         onProgress(currentPage, totalPages);
       }
-      
+
       await page.goto(url);
       await page.waitForLoadState('networkidle');
 
@@ -311,10 +311,10 @@ async function getCommits(
         totalPages = await page.evaluate(() => {
           const tfoot = document.querySelector('table tfoot td');
           if (!tfoot) return null;
-          
+
           const links = tfoot.querySelectorAll('a');
           if (links.length === 0) return 1; // 페이지네이션 없음 = 단일 페이지
-          
+
           // ">>" 링크 찾기 (마지막 페이지로 이동)
           const lastPageLink = Array.from(links).find(link => link.textContent?.trim() === '>>');
           if (lastPageLink) {
@@ -326,7 +326,7 @@ async function getCommits(
               }
             }
           }
-          
+
           // ">>" 링크가 없으면 숫자 링크 중 최대값 찾기
           let maxPage = 1;
           links.forEach(link => {
@@ -335,12 +335,12 @@ async function getCommits(
               maxPage = pageNum;
             }
           });
-          
+
           return maxPage > 0 ? maxPage : 1;
         });
-        
+
         console.log(`Total pages detected: ${totalPages === 1 ? 'single page' : totalPages + ' pages'}`);
-        
+
         // 첫 페이지 정보로 다시 진행 상황 전송
         if (onProgress) {
           onProgress(currentPage, totalPages);
@@ -356,7 +356,7 @@ async function getCommits(
           const dateElement = element.querySelector('.commitdate');
           const authorElement = element.querySelector('h4');
           const commitUrl = linkElement?.getAttribute('href') || '';
-          
+
           // URL에서 commit ID 추출
           const commitIdMatch = commitUrl.match(/commit=([a-f0-9]+)/i);
           const commitId = commitIdMatch ? commitIdMatch[1] : '';
@@ -399,13 +399,13 @@ async function getCommits(
     }
 
     console.log(`Total NEW commits fetched: ${allCommits.length}${cacheHit ? ' (stopped at cached commit)' : ''}`);
-    
+
     // 날짜를 ISO 형식으로 변환
     const commitsWithConvertedDates = allCommits.map(commit => ({
       ...commit,
       date: convertKoreanDateToISO(commit.date)
     }));
-    
+
     return commitsWithConvertedDates;
   } catch (error) {
     console.error('Get commits error:', error);
@@ -438,7 +438,7 @@ async function getCommitDetail(subProjectUuid: string, commitId: string): Promis
         const linkElement = fileElement.querySelector('a[href*="Blob"]');
         const countElement = fileElement.querySelector('.count');
         const iconElement = fileElement.querySelector('i.fa');
-        
+
         let status = 'modified';
         if (iconElement?.classList.contains('fa-plus-square-o')) status = 'added';
         else if (iconElement?.classList.contains('fa-minus-square-o')) status = 'deleted';
@@ -449,6 +449,7 @@ async function getCommitDetail(subProjectUuid: string, commitId: string): Promis
 
         files.push({
           path: linkElement?.textContent?.trim() || '',
+          blobUrl: linkElement?.getAttribute('href') || '',
           status,
           changes: changesMatch ? parseInt(changesMatch[1]) : 0,
           additions: changesMatch ? parseInt(changesMatch[2]) : 0,
@@ -482,6 +483,41 @@ async function getCommitDetail(subProjectUuid: string, commitId: string): Promis
     };
   } catch (error) {
     console.error('Get commit detail error:', error);
+    throw error;
+  }
+}
+
+// 파일 전체 내용 조회 (Blob 페이지에서)
+async function getFileContent(blobUrl: string): Promise<string> {
+  if (!page) throw new Error('Page not initialized');
+
+  try {
+    // 상대 경로를 절대 경로로 변환
+    const fullUrl = blobUrl.startsWith('http')
+      ? blobUrl
+      : `http://git.wnpsoft.co.kr${blobUrl}`;
+
+    await page.goto(fullUrl, {
+      timeout: 60000
+    });
+    await page.waitForLoadState('networkidle', {
+      timeout: 60000
+    });
+
+    const fileContent = await page.evaluate(() => {
+      // Blob 페이지에서 파일 내용 추출
+      // 일반적으로 <pre><code> 태그 안에 있거나, .blob pre code 안에 있음
+      const codeElement = document.querySelector('.blob pre code') ||
+                         document.querySelector('pre code') ||
+                         document.querySelector('.blob pre') ||
+                         document.querySelector('pre');
+
+      return codeElement?.textContent || '';
+    });
+
+    return fileContent;
+  } catch (error) {
+    console.error('Get file content error:', error);
     throw error;
   }
 }
@@ -525,6 +561,7 @@ export {
   getBranches,
   getCommits,
   getCommitDetail,
+  getFileContent,
   getAuthors
 };
 

@@ -27,6 +27,7 @@ import {
   getBranches,
   getCommits,
   getCommitDetail as crawlCommitDetail,
+  getFileContent,
   getAuthors
 } from "../crawling/main";
 
@@ -248,7 +249,7 @@ function initIpc() {
           total: allCommitsInBranch.length,
           branch,
           phase: 'details',
-          message: `커밋 상세 정보 크롤링 중... (${i + 1}/${allCommitsInBranch.length})`
+          message: `커밋 상세 정보 크롤링 중... (${i}/${allCommitsInBranch.length})`
         });
 
         try {
@@ -359,6 +360,18 @@ function initIpc() {
     } catch (error) {
       console.error('Error crawling commit detail:', error);
       event.reply('crawl-commit-detail', null);
+    }
+  });
+
+  // 파일 전체 내용 크롤링
+  ipcMain.on('get-file-content', async (event, blobUrl: string) => {
+    try {
+      const content = await getFileContent(blobUrl);
+      event.reply('get-file-content', content);
+    } catch (error) {
+      console.error('Error getting file content:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      event.reply('get-file-content', { error: errorMessage });
     }
   });
 

@@ -229,10 +229,11 @@
       ],
       "sign": false,
       "signDlls": false,
-      "verifyUpdateCodeSignature": false
+      "verifyUpdateCodeSignature": false,
+      "asarUnpack": "**\\*.{node,dll}"
     },
     "linux": {
-      "icon": "assets/icons/png/512.png",
+      "icon": "assets/icon.ico",
       "target": [
         "AppImage"
       ],

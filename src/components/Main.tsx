@@ -13,6 +13,7 @@ interface CommitFile {
   commit_id: string;
   commit_file: string;
   commit_content: string;
+  blobUrl?: string;
 }
 
 interface Branch {
@@ -42,6 +43,9 @@ function Main() {
   const [selectedFile, setSelectedFile] = useState<CommitFile | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [lastClickedCommitId, setLastClickedCommitId] = useState<string | null>(null);
+  const [showFullContent, setShowFullContent] = useState(false);
+  const [fullFileContent, setFullFileContent] = useState<string>('');
+  const [isLoadingFullContent, setIsLoadingFullContent] = useState(false);
 
   // 이스터에그 상태
   const [easterEggStep, setEasterEggStep] = useState(0);
@@ -268,7 +272,8 @@ function Main() {
             const files = detail.files.map((file: any) => ({
               commit_id: commit.commit_id,
               commit_file: file.path,
-              commit_content: file.diff
+              commit_content: file.diff,
+              blobUrl: file.blobUrl || ''
             }));
             setCommitFiles(files);
             setShowModal(true);
@@ -289,6 +294,82 @@ function Main() {
 
   const handleFileClick = (file: CommitFile) => {
     setSelectedFile(file);
+    setShowFullContent(false);
+    setFullFileContent('');
+  };
+
+  const handleFullContentClick = () => {
+    if (showFullContent) {
+      // Diff 보기로 전환
+      setShowFullContent(false);
+    } else {
+      // 전체 내용 보기로 전환
+      if (selectedFile?.blobUrl) {
+        // blobUrl이 있으면 바로 크롤링
+        setIsLoadingFullContent(true);
+        setShowFullContent(true);
+        
+        window.electron.ipcRenderer.sendMessage('get-file-content', selectedFile.blobUrl);
+        
+        const handleFileContent = (content: string | { error?: string }) => {
+          if (typeof content === 'string') {
+            setFullFileContent(content);
+          } else if (content.error) {
+            console.error('Error loading file content:', content.error);
+            setFullFileContent('파일 내용을 불러오는 중 오류가 발생했습니다.');
+          }
+          setIsLoadingFullContent(false);
+        };
+        
+        window.electron.ipcRenderer.once('get-file-content', handleFileContent);
+      } else if (selectedFile && selectedCommit) {
+        // blobUrl이 없으면 커밋 상세 정보를 다시 크롤링해서 blobUrl 가져오기
+        setIsLoadingFullContent(true);
+        setShowFullContent(true);
+        
+        window.electron.ipcRenderer.sendMessage('crawl-commit-detail', {
+          uuid,
+          commitId: selectedFile.commit_id,
+          branch: selectedBranch
+        });
+        
+        const handleCrawlDetail = (detail: any) => {
+          if (detail && detail.files) {
+            // 해당 파일의 blobUrl 찾기
+            const file = detail.files.find((f: any) => f.path === selectedFile.commit_file);
+            if (file && file.blobUrl) {
+              // blobUrl로 파일 내용 크롤링
+              window.electron.ipcRenderer.sendMessage('get-file-content', file.blobUrl);
+              
+              const handleFileContent = (content: string | { error?: string }) => {
+                if (typeof content === 'string') {
+                  setFullFileContent(content);
+                } else if (content.error) {
+                  console.error('Error loading file content:', content.error);
+                  setFullFileContent('파일 내용을 불러오는 중 오류가 발생했습니다.');
+                }
+                setIsLoadingFullContent(false);
+              };
+              
+              window.electron.ipcRenderer.once('get-file-content', handleFileContent);
+            } else {
+              // blobUrl을 찾을 수 없으면 현재 diff 내용을 표시
+              setFullFileContent(selectedFile.commit_content || '');
+              setIsLoadingFullContent(false);
+            }
+          } else {
+            setFullFileContent(selectedFile.commit_content || '');
+            setIsLoadingFullContent(false);
+          }
+        };
+        
+        window.electron.ipcRenderer.once('crawl-commit-detail', handleCrawlDetail);
+      } else {
+        // blobUrl도 없고 커밋 정보도 없으면 현재 diff 내용을 전체 내용으로 표시
+        setShowFullContent(true);
+        setFullFileContent(selectedFile?.commit_content || '');
+      }
+    }
   };
 
   const handleAuthorChange = (author: string) => {
@@ -329,20 +410,61 @@ function Main() {
     if (!diff) return null;
 
     const lines = diff.split('\n');
-    return lines.map((line, index) => {
+    const filteredLines: { lineType: '+' | '-' | ' ' | null; content: string; bgColor: string }[] = [];
+    
+    for (const line of lines) {
+      // diff 메타데이터 필터링
+      // 1. diff --git으로 시작하는 줄 제거
+      if (line.startsWith('diff --git')) continue;
+      
+      // 2. 파일 모드 정보 제거 (new file mode, deleted file mode, old mode, new mode)
+      if (/^(new|deleted|old|new) file mode/.test(line)) continue;
+      
+      // 3. index 정보 제거
+      if (line.startsWith('index ')) continue;
+      
+      // 4. --- /dev/null 또는 --- a/... 제거
+      if (line.startsWith('--- ')) continue;
+      
+      // 5. +++ b/... 제거
+      if (line.startsWith('+++ ')) continue;
+      
+      // 6. @@ -0,0 +1,33 @@ 형식의 hunk 헤더 제거
+      if (/^@@\s+[-+]?\d+(?:,\d+)?\s+[-+]?\d+(?:,\d+)?\s+@@/.test(line)) continue;
+      
+      // 7. \ No newline at end of file 제거
+      if (line.trim() === '\\ No newline at end of file') continue;
+      
+      // 실제 코드 변경 내용만 처리
       let bgColor = 'transparent';
-      if (line.startsWith('+') && !line.startsWith('+++')) {
+      let lineType: '+' | '-' | ' ' | null = null;
+      let content = line;
+      
+      if (line.startsWith('+')) {
         bgColor = '#e6ffec';
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        lineType = '+';
+        content = line.substring(1);
+      } else if (line.startsWith('-')) {
         bgColor = '#ffebe9';
+        lineType = '-';
+        content = line.substring(1);
+      } else if (line.startsWith(' ')) {
+        lineType = ' ';
+        content = line.substring(1);
+      } else {
+        // 다른 형식의 줄은 그대로 표시 (배경색 없음)
+        content = line;
       }
+      
+      filteredLines.push({ lineType, content, bgColor });
+    }
 
-      return (
-        <DiffLine key={index} bgColor={bgColor}>
-          {line}
-        </DiffLine>
-      );
-    });
+    return filteredLines.map((item, index) => (
+      <DiffLine key={index} bgColor={item.bgColor}>
+        {item.lineType && <DiffPrefix $type={item.lineType}>{item.lineType}</DiffPrefix>}
+        <DiffContent>{item.content}</DiffContent>
+      </DiffLine>
+    ));
   };
 
   // 프로젝트 선택하지 않았을 때
@@ -496,9 +618,27 @@ function Main() {
               ) : (
                 <>
                   <BackButton onClick={() => setSelectedFile(null)}>← 뒤로</BackButton>
-                  <FileTitle>{selectedFile.commit_file}</FileTitle>
+                  <FileHeader>
+                    <FileTitle>{selectedFile.commit_file}</FileTitle>
+                    <FullContentButton 
+                      onClick={handleFullContentClick}
+                      disabled={isLoadingFullContent}
+                    >
+                      {isLoadingFullContent 
+                        ? '⏳ 로딩 중...' 
+                        : showFullContent 
+                        ? '📄 Diff 보기' 
+                        : '📋 전체 내용 보기'}
+                    </FullContentButton>
+                  </FileHeader>
                   <DiffContainer>
-                    <pre>{renderDiff(selectedFile.commit_content)}</pre>
+                    {showFullContent ? (
+                      <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {isLoadingFullContent ? '파일 내용을 불러오는 중...' : fullFileContent}
+                      </pre>
+                    ) : (
+                      <pre>{renderDiff(selectedFile.commit_content)}</pre>
+                    )}
                   </DiffContainer>
                 </>
               )}
@@ -880,14 +1020,51 @@ const BackButton = styled.button`
   }
 `;
 
+const FileHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 12px;
+`;
+
 const FileTitle = styled.h3`
   font-size: 16px;
   font-weight: 600;
   color: #333;
-  margin: 0 0 16px 0;
+  margin: 0;
   padding: 12px;
   background: #f8f9fa;
   border-radius: 6px;
+  flex: 1;
+`;
+
+const FullContentButton = styled.button`
+  background: #667eea;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    background: #5568d3;
+    transform: translateY(-1px);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  &:disabled {
+    background: #999;
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
 `;
 
 const DiffContainer = styled.div`
@@ -908,8 +1085,31 @@ const DiffContainer = styled.div`
 
 const DiffLine = styled.div<{ bgColor: string }>`
   background-color: ${props => props.bgColor};
-  padding: 2px 8px;
+  padding: 2px 0;
   white-space: pre;
+  display: flex;
+  align-items: flex-start;
+  user-select: text;
+`;
+
+const DiffPrefix = styled.span<{ $type: '+' | '-' | ' ' }>`
+  display: inline-block;
+  width: 24px;
+  text-align: center;
+  font-weight: bold;
+  color: ${props => 
+    props.$type === '+' ? '#28a745' : 
+    props.$type === '-' ? '#dc3545' : 
+    '#666'};
+  user-select: none;
+  flex-shrink: 0;
+  padding: 2px 4px;
+`;
+
+const DiffContent = styled.span`
+  flex: 1;
+  padding: 2px 8px;
+  user-select: text;
 `;
 
 const LoadingMessage = styled.div`
